@@ -16,7 +16,6 @@ from sentinel.framework.watching import LocalWatcherConnector
 from keriguard.core import WireguardConfigManager
 from keriguard.core.systeming import (
     restart_wireguard,
-    WireGuardControlError,
     enable_wireguard,
     start_wireguard,
 )

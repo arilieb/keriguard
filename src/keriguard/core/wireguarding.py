@@ -823,6 +823,7 @@ class WireguardConfigWriter:
                 path.chmod(0o600)
             except PermissionError:
                 import getpass
+
                 _tee = shutil.which("tee") or "/usr/bin/tee"
                 result = subprocess.run(
                     ["sudo", _tee, str(path)],
@@ -1171,7 +1172,9 @@ class WireguardConfigManager:
             try:
                 shutil.copy2(path, backup_path)
             except PermissionError:
-                logger.warning(f"Cannot create backup at {backup_path}: permission denied")
+                logger.warning(
+                    f"Cannot create backup at {backup_path}: permission denied"
+                )
 
         # Write configuration
         WireguardConfigWriter.write_file(config, path)

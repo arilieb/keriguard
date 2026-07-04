@@ -17,12 +17,14 @@ import os
 import platform
 import re
 import shutil
+import subprocess
 from enum import StrEnum
 from pathlib import Path
 
 try:
     from dbus_fast import BusType
     from dbus_fast.aio import MessageBus
+
     _HAS_DBUS = True
 except ImportError:
     _HAS_DBUS = False
@@ -45,6 +47,7 @@ _WG_UAPI_SOCK_DIR = Path("/var/run/wireguard")
 # NOT on sudo's secure_path.  Using absolute paths ensures subprocess calls
 # (especially those prefixed with "sudo") find the correct binaries.
 # ---------------------------------------------------------------------------
+
 
 def _resolve_utun_name(interface: str) -> str:
     """Resolve a wg-quick alias (e.g. 'wg0') to the real utun device name.
@@ -69,13 +72,15 @@ def _resolve_utun_name(interface: str) -> str:
     except PermissionError:
         result = subprocess.run(
             ["sudo", _WG_BIN, "show", "interfaces"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         if result.returncode == 0:
             ifaces = result.stdout.strip().split()
             if len(ifaces) == 1:
                 return ifaces[0]
         return interface
+
 
 def _resolve_tool(name: str) -> str:
     """Return the absolute path to a CLI tool, or fall back to the bare name."""
@@ -105,6 +110,7 @@ class WireGuardControlError(RuntimeError):
 # Platform detection
 # ---------------------------------------------------------------------------
 
+
 def supports_dbus_systemd() -> bool:
     if not _HAS_DBUS:
         return False
@@ -126,6 +132,7 @@ def wg_quick_unit(interface: str) -> str:
 # ---------------------------------------------------------------------------
 # Linux: systemd / D-Bus
 # ---------------------------------------------------------------------------
+
 
 async def call_systemd(action: WireGuardAction, interface: str) -> object:
     unit = wg_quick_unit(interface)
@@ -157,6 +164,7 @@ async def call_systemd(action: WireGuardAction, interface: str) -> object:
 # ---------------------------------------------------------------------------
 # macOS: wg-quick (bring-up/teardown) + wg syncconf (hot reconfiguration)
 # ---------------------------------------------------------------------------
+
 
 async def _is_wireguard_up(interface: str) -> bool:
     """Return True if the named WireGuard interface is currently running.
@@ -200,7 +208,10 @@ async def _is_wireguard_up(interface: str) -> bool:
 
     # Fallback: ask the wg tool directly
     proc = await asyncio.create_subprocess_exec(
-        "sudo", _WG_BIN, "show", interface,
+        "sudo",
+        _WG_BIN,
+        "show",
+        interface,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -214,8 +225,9 @@ async def _is_wireguard_up(interface: str) -> bool:
     return is_up
 
 
-async def _mac_syncconf(interface: str, config_path: str,
-                        real_iface: str | None = None) -> None:
+async def _mac_syncconf(
+    interface: str, config_path: str, real_iface: str | None = None
+) -> None:
     """Apply a config file to a running WireGuard interface without disruption.
 
     Runs ``sudo wg-quick strip`` to remove Address/DNS/routing directives
@@ -234,7 +246,10 @@ async def _mac_syncconf(interface: str, config_path: str,
     # wg-quick unconditionally checks for root before any subcommand, so
     # 'strip' must also be run via sudo.
     strip = await asyncio.create_subprocess_exec(
-        "sudo", _WG_QUICK_BIN, "strip", config_path,
+        "sudo",
+        _WG_QUICK_BIN,
+        "strip",
+        config_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -245,7 +260,11 @@ async def _mac_syncconf(interface: str, config_path: str,
         )
 
     sync = await asyncio.create_subprocess_exec(
-        "sudo", _WG_BIN, "syncconf", real_iface, "/dev/stdin",
+        "sudo",
+        _WG_BIN,
+        "syncconf",
+        real_iface,
+        "/dev/stdin",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -262,10 +281,11 @@ async def _mac_syncconf(interface: str, config_path: str,
 # Unified control entry point
 # ---------------------------------------------------------------------------
 
+
 async def control_wireguard(
-        action: WireGuardAction,
-        interface: str,
-        config_path: str | None = None,
+    action: WireGuardAction,
+    interface: str,
+    config_path: str | None = None,
 ) -> object:
     if supports_dbus_systemd():
         return await call_systemd(action, interface)
@@ -282,14 +302,19 @@ async def control_wireguard(
             )
 
         match action:
-            case (WireGuardAction.START
-                  | WireGuardAction.RESTART
-                  | WireGuardAction.RELOAD
-                  | WireGuardAction.RELOAD_OR_RESTART):
+            case (
+                WireGuardAction.START
+                | WireGuardAction.RESTART
+                | WireGuardAction.RELOAD
+                | WireGuardAction.RELOAD_OR_RESTART
+            ):
                 if await _is_wireguard_up(interface):
                     return await _mac_syncconf(interface, config_path)
                 proc = await asyncio.create_subprocess_exec(
-                    "sudo", _WG_QUICK_BIN, "up", config_path,
+                    "sudo",
+                    _WG_QUICK_BIN,
+                    "up",
+                    config_path,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -308,15 +333,19 @@ async def control_wireguard(
                             f"wg-quick up: {interface!r} already exists as "
                             f"{real_iface!r} — falling back to syncconf"
                         )
-                        return await _mac_syncconf(interface, config_path,
-                                                   real_iface=real_iface)
+                        return await _mac_syncconf(
+                            interface, config_path, real_iface=real_iface
+                        )
                     raise WireGuardControlError(
                         f"wg-quick up failed for {config_path!r}: {err_str}"
                     )
 
             case WireGuardAction.STOP | WireGuardAction.DISABLE:
                 proc = await asyncio.create_subprocess_exec(
-                    "sudo", _WG_QUICK_BIN, "down", config_path,
+                    "sudo",
+                    _WG_QUICK_BIN,
+                    "down",
+                    config_path,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -327,9 +356,7 @@ async def control_wireguard(
                     )
 
             case _:
-                raise WireGuardControlError(
-                    f"Unsupported action for macOS: {action!r}"
-                )
+                raise WireGuardControlError(f"Unsupported action for macOS: {action!r}")
         return
 
     if system == "Windows":
@@ -351,6 +378,7 @@ async def control_wireguard(
 # Convenience wrappers
 # ---------------------------------------------------------------------------
 
+
 async def start_wireguard(interface: str, config_path: str | None = None) -> object:
     return await control_wireguard(WireGuardAction.START, interface, config_path)
 
@@ -367,8 +395,12 @@ async def reload_wireguard(interface: str, config_path: str | None = None) -> ob
     return await control_wireguard(WireGuardAction.RELOAD, interface, config_path)
 
 
-async def reload_or_restart_wireguard(interface: str, config_path: str | None = None) -> object:
-    return await control_wireguard(WireGuardAction.RELOAD_OR_RESTART, interface, config_path)
+async def reload_or_restart_wireguard(
+    interface: str, config_path: str | None = None
+) -> object:
+    return await control_wireguard(
+        WireGuardAction.RELOAD_OR_RESTART, interface, config_path
+    )
 
 
 async def enable_wireguard(interface: str, config_path: str | None = None) -> object:
