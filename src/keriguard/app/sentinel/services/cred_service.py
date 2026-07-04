@@ -20,7 +20,7 @@ from keriguard.core.systeming import (
     enable_wireguard,
     start_wireguard,
 )
-from keriguard.core.wireguarding import PeerAIDMissingError
+from keriguard.core.wireguarding import PeerAIDMissingError, PeerResolutionPendingError
 
 logger = help.ogler.getLogger()
 
@@ -67,8 +67,26 @@ class CredService:
             return
 
         config_path = Path(self.config_dir) / f"{interface_name}.conf"
-        if not config_path.exists() or not config_path.is_file():
-            manager = WireguardConfigManager(hab=hab)
+        manager = WireguardConfigManager(hab=hab)
+        config = None
+
+        if config_path.exists() and config_path.is_file():
+            try:
+                config = manager.load_config(config_path)
+                config.address = interface.get("address")
+                config.listen_port = interface.get("listenPort")
+                config.dns = interface.get("dns", None)
+                config.mtu = interface.get("mtu")
+                config.table = interface.get("table", None)
+                config.config_name = interface_name
+                config.description = interface_description
+            except Exception as e:
+                logger.warning(
+                    f"Could not load existing config at {config_path}: {e}; regenerating"
+                )
+                config = None
+
+        if config is None:
             config = manager.generate_config(
                 address=interface.get("address"),
                 listen_port=interface.get("listenPort"),
@@ -90,17 +108,6 @@ class CredService:
                     keri_aid=registrar.keriguard_aid,
                 )
 
-        else:
-            manager = WireguardConfigManager(hab=hab)
-            config = manager.load_config(config_path)
-            config.address = interface.get("address")
-            config.listen_port = interface.get("listenPort")
-            config.dns = interface.get("dns", None)
-            config.mtu = interface.get("mtu")
-            config.table = interface.get("table", None)
-            config.config_name = interface_name
-            config.description = interface_description
-
         # Add pre/post up/down scripts if provided
         # Handle argument names with underscores (argparse converts dashes to underscores)
         config.interface.pre_up = interface.get("preUp")
@@ -113,15 +120,9 @@ class CredService:
             config, Path(self.config_dir) / f"{interface_name}.conf", backup=True
         )
 
-        try:
-            await enable_wireguard(interface_name)
-            await start_wireguard(interface_name)
-
-        except WireGuardControlError as e:
-            logger.error(
-                f"Failed to enable and start WireGuard interface {interface_name}: {e}"
-            )
-            return
+        config_path = str(Path(self.config_dir) / f"{interface_name}.conf")
+        await enable_wireguard(interface_name)
+        await start_wireguard(interface_name, config_path)
 
         logger.debug(f"Interface credential service processing complete for {said}")
 
@@ -228,31 +229,26 @@ class CredService:
             except PeerAIDMissingError:
                 logger.warning(
                     f"Peer AID {remote_aid} not found in kevers for credential {said}. "
-                    f"Starting background resolution task."
+                    f"Queuing background resolution and signalling caller to retry."
                 )
-                # Start background task to resolve AID and retry
                 if self.hab and self.sentinel_aid:
                     asyncio.create_task(
                         self.resolve_peer_aid_and_retry(
                             said=said, creder=creder, missing_aid=remote_aid
                         )
                     )
-                    # Don't continue with save/restart since peer wasn't added
-                    return
+                    raise PeerResolutionPendingError(
+                        f"Peer AID {remote_aid} queued for resolution; retry after watcher "
+                        f"fetches the KEL from witnesses"
+                    )
                 else:
                     raise
 
             # Save updated configuration
             manager.save_config(config, config_path, backup=True)
 
-            try:
-                await restart_wireguard(interface_name)
-
-            except WireGuardControlError as e:
-                logger.error(
-                    f"Failed to restart WireGuard interface {interface_name}: {e}"
-                )
-                return
+            conn_config_path = str(Path(self.config_dir) / f"{interface_name}.conf")
+            await restart_wireguard(interface_name, conn_config_path)
 
         except MissingEntryError:
             logger.error(f"Missing entry for interface credential: {said}")
