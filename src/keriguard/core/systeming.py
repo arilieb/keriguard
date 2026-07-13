@@ -199,14 +199,43 @@ async def _is_wireguard_up(interface: str) -> bool:
                     f"socket {sock} is missing — stale name file"
                 )
         except PermissionError:
-            # Running as non-root: can't read .name contents.
-            # Fall through to sudo wg show.
+            # macOS: wg-quick creates the .name file as root (600).  We
+            # can't read its contents, so we can't directly resolve the
+            # utun name.  Use `sudo wg show interfaces` instead — it lists
+            # every running utun and is covered by the existing sudoers rule.
             _log.debug(
-                f"_is_wireguard_up({interface!r}): name file exists but "
-                f"unreadable — falling back to sudo wg show"
+                f"_is_wireguard_up({interface!r}): name file unreadable — "
+                f"checking via sudo wg show interfaces"
             )
+            iface_proc = await asyncio.create_subprocess_exec(
+                "sudo", _WG_BIN, "show", "interfaces",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            iface_out, _ = await iface_proc.communicate()
+            if iface_proc.returncode == 0:
+                running = iface_out.decode().split()
+                if len(running) == 1:
+                    # Unambiguous: only one interface, verify its socket is live.
+                    sock = _WG_UAPI_SOCK_DIR / f"{running[0]}.sock"
+                    _log.debug(
+                        f"_is_wireguard_up({interface!r}): resolved to "
+                        f"{running[0]!r}, socket {'exists' if sock.exists() else 'missing'}"
+                    )
+                    return sock.exists()
+                if running:
+                    # Multiple interfaces running; the .name file for our alias
+                    # exists, so our interface was brought up by wg-quick.
+                    _log.debug(
+                        f"_is_wireguard_up({interface!r}): {len(running)} interface(s) "
+                        f"running, .name file present — assuming interface is up"
+                    )
+                    return True
+            return False
 
-    # Fallback: ask the wg tool directly
+    # Fallback: ask wg directly.  Works on Linux where the interface name IS
+    # the real kernel name.  On macOS this path is taken only when the .name
+    # file does not exist (i.e. the interface was never brought up).
     proc = await asyncio.create_subprocess_exec(
         "sudo",
         _WG_BIN,
