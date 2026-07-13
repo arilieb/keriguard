@@ -208,7 +208,10 @@ async def _is_wireguard_up(interface: str) -> bool:
                 f"checking via sudo wg show interfaces"
             )
             iface_proc = await asyncio.create_subprocess_exec(
-                "sudo", _WG_BIN, "show", "interfaces",
+                "sudo",
+                _WG_BIN,
+                "show",
+                "interfaces",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
