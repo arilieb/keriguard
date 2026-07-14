@@ -3,6 +3,11 @@
 Unit tests for keriguard.core.systeming module
 """
 
+import asyncio
+import json
+import shutil
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -10,6 +15,8 @@ import pytest
 from keriguard.core.systeming import (
     WireGuardAction,
     WireGuardControlError,
+    WireGuardNotApprovedError,
+    _send_helper_request,
     call_systemd,
     control_wireguard,
     disable_wireguard,
@@ -450,155 +457,193 @@ class TestControlWireguard:
 
     @pytest.mark.asyncio
     @patch("keriguard.core.systeming.supports_dbus_systemd")
-    @patch("keriguard.core.systeming._is_wireguard_up")
-    @patch("keriguard.core.systeming.asyncio.create_subprocess_exec")
-    async def test_control_wireguard_macos_start_fresh(
-        self, mock_subprocess, mock_is_up, mock_supports
+    @patch("keriguard.core.systeming._send_helper_request")
+    async def test_control_wireguard_macos_start_sends_start_action(
+        self, mock_send, mock_supports, tmp_path
     ):
-        """Test that macOS START calls wg-quick up when interface is down."""
+        """Test that macOS START reads the config file and sends a 'start' IPC action."""
         mock_supports.return_value = False
-        mock_is_up.return_value = False
+        mock_send.return_value = {"ok": True, "state": "up"}
 
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-        mock_proc.returncode = 0
-        mock_subprocess.return_value = mock_proc
+        config_path = tmp_path / "wg0.conf"
+        config_path.write_text("[Interface]\nPrivateKey = abc\n")
 
         with patch("keriguard.core.systeming.platform.system", return_value="Darwin"):
-            await control_wireguard(
-                WireGuardAction.START, "wg0", config_path="/etc/wireguard/wg0.conf"
+            result = await control_wireguard(
+                WireGuardAction.START, "wg0", config_path=str(config_path)
             )
 
-        mock_is_up.assert_called_once_with("wg0")
-        mock_subprocess.assert_called_once()
-        # Verify the wg-quick up command args
-        call_args = mock_subprocess.call_args[0]
-        assert "sudo" in call_args
-        assert "up" in call_args
-        assert "/etc/wireguard/wg0.conf" in call_args
+        assert result == {"ok": True, "state": "up"}
+        mock_send.assert_called_once_with(
+            "start", "wg0", config="[Interface]\nPrivateKey = abc\n"
+        )
 
     @pytest.mark.asyncio
     @patch("keriguard.core.systeming.supports_dbus_systemd")
-    @patch("keriguard.core.systeming._is_wireguard_up")
-    @patch("keriguard.core.systeming._mac_syncconf")
-    async def test_control_wireguard_macos_start_already_up(
-        self, mock_syncconf, mock_is_up, mock_supports
+    @patch("keriguard.core.systeming._send_helper_request")
+    async def test_control_wireguard_macos_restart_sends_restart_action(
+        self, mock_send, mock_supports, tmp_path
     ):
-        """Test that macOS START uses syncconf when interface is already up."""
+        """Test that RESTART maps to the 'restart' IPC action — the helper has
+        no hot in-place reconfigure, so anything beyond an initial START is
+        always a full stop-then-start."""
         mock_supports.return_value = False
-        mock_is_up.return_value = True
-        mock_syncconf.return_value = None
+        mock_send.return_value = {"ok": True, "state": "up"}
+
+        config_path = tmp_path / "wg0.conf"
+        config_path.write_text("[Interface]\nPrivateKey = abc\n")
 
         with patch("keriguard.core.systeming.platform.system", return_value="Darwin"):
             await control_wireguard(
-                WireGuardAction.START, "wg0", config_path="/etc/wireguard/wg0.conf"
+                WireGuardAction.RESTART, "wg0", config_path=str(config_path)
             )
 
-        mock_is_up.assert_called_once_with("wg0")
-        mock_syncconf.assert_called_once_with("wg0", "/etc/wireguard/wg0.conf")
+        mock_send.assert_called_once_with(
+            "restart", "wg0", config="[Interface]\nPrivateKey = abc\n"
+        )
 
     @pytest.mark.asyncio
     @patch("keriguard.core.systeming.supports_dbus_systemd")
-    @patch("keriguard.core.systeming._is_wireguard_up")
-    @patch("keriguard.core.systeming.asyncio.create_subprocess_exec")
-    async def test_control_wireguard_macos_start_failure(
-        self, mock_subprocess, mock_is_up, mock_supports
+    @patch("keriguard.core.systeming._send_helper_request")
+    async def test_control_wireguard_macos_reload_sends_restart_action(
+        self, mock_send, mock_supports, tmp_path
     ):
-        """Test that macOS START raises WireGuardControlError on wg-quick failure."""
+        """Test that RELOAD also maps to the 'restart' IPC action (no hot reconfigure)."""
         mock_supports.return_value = False
-        mock_is_up.return_value = False
+        mock_send.return_value = {"ok": True, "state": "up"}
 
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b"some error occurred"))
-        mock_proc.returncode = 1
-        mock_subprocess.return_value = mock_proc
+        config_path = tmp_path / "wg0.conf"
+        config_path.write_text("[Interface]\nPrivateKey = abc\n")
+
+        with patch("keriguard.core.systeming.platform.system", return_value="Darwin"):
+            await control_wireguard(
+                WireGuardAction.RELOAD, "wg0", config_path=str(config_path)
+            )
+
+        mock_send.assert_called_once_with(
+            "restart", "wg0", config="[Interface]\nPrivateKey = abc\n"
+        )
+
+    @pytest.mark.asyncio
+    @patch("keriguard.core.systeming.supports_dbus_systemd")
+    @patch("keriguard.core.systeming._send_helper_request")
+    async def test_control_wireguard_macos_reload_or_restart_sends_restart_action(
+        self, mock_send, mock_supports, tmp_path
+    ):
+        """Test that RELOAD_OR_RESTART also maps to the 'restart' IPC action."""
+        mock_supports.return_value = False
+        mock_send.return_value = {"ok": True, "state": "up"}
+
+        config_path = tmp_path / "wg0.conf"
+        config_path.write_text("[Interface]\nPrivateKey = abc\n")
+
+        with patch("keriguard.core.systeming.platform.system", return_value="Darwin"):
+            await control_wireguard(
+                WireGuardAction.RELOAD_OR_RESTART, "wg0", config_path=str(config_path)
+            )
+
+        mock_send.assert_called_once_with(
+            "restart", "wg0", config="[Interface]\nPrivateKey = abc\n"
+        )
+
+    @pytest.mark.asyncio
+    @patch("keriguard.core.systeming.supports_dbus_systemd")
+    async def test_control_wireguard_macos_start_missing_file(self, mock_supports):
+        """Test that a config_path pointing at a nonexistent file raises WireGuardControlError."""
+        mock_supports.return_value = False
 
         with patch("keriguard.core.systeming.platform.system", return_value="Darwin"):
             with pytest.raises(
-                WireGuardControlError,
-                match="wg-quick up failed for",
+                WireGuardControlError, match="Could not read config file"
             ):
                 await control_wireguard(
                     WireGuardAction.START,
                     "wg0",
-                    config_path="/etc/wireguard/wg0.conf",
+                    config_path="/nonexistent/wg0.conf",
                 )
 
     @pytest.mark.asyncio
     @patch("keriguard.core.systeming.supports_dbus_systemd")
-    @patch("keriguard.core.systeming._is_wireguard_up")
-    @patch("keriguard.core.systeming._mac_syncconf")
-    @patch("keriguard.core.systeming.asyncio.create_subprocess_exec")
-    async def test_control_wireguard_macos_start_already_exists_fallback(
-        self, mock_subprocess, mock_syncconf, mock_is_up, mock_supports
+    @patch("keriguard.core.systeming._send_helper_request")
+    async def test_control_wireguard_macos_start_propagates_helper_error(
+        self, mock_send, mock_supports, tmp_path
     ):
-        """Test that macOS START falls back to syncconf when wg-quick reports 'already exists'."""
+        """Test that a WireGuardControlError from the helper propagates unchanged."""
         mock_supports.return_value = False
-        mock_is_up.return_value = False
-        mock_syncconf.return_value = None
-
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(
-            return_value=(b"", b"wg0' already exists as `utun4'")
-        )
-        mock_proc.returncode = 1
-        mock_subprocess.return_value = mock_proc
-
-        with patch("keriguard.core.systeming.platform.system", return_value="Darwin"):
-            await control_wireguard(
-                WireGuardAction.START, "wg0", config_path="/etc/wireguard/wg0.conf"
-            )
-
-        mock_syncconf.assert_called_once_with(
-            "wg0", "/etc/wireguard/wg0.conf", real_iface="utun4"
+        mock_send.side_effect = WireGuardControlError(
+            "KERIGuard Helper returned error: start_failed: timed out"
         )
 
-    @pytest.mark.asyncio
-    @patch("keriguard.core.systeming.supports_dbus_systemd")
-    @patch("keriguard.core.systeming.asyncio.create_subprocess_exec")
-    async def test_control_wireguard_macos_stop(self, mock_subprocess, mock_supports):
-        """Test that macOS STOP calls wg-quick down."""
-        mock_supports.return_value = False
-
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-        mock_proc.returncode = 0
-        mock_subprocess.return_value = mock_proc
+        config_path = tmp_path / "wg0.conf"
+        config_path.write_text("[Interface]\nPrivateKey = abc\n")
 
         with patch("keriguard.core.systeming.platform.system", return_value="Darwin"):
-            await control_wireguard(
-                WireGuardAction.STOP, "wg0", config_path="/etc/wireguard/wg0.conf"
-            )
-
-        call_args = mock_subprocess.call_args[0]
-        assert "sudo" in call_args
-        assert "down" in call_args
-        assert "/etc/wireguard/wg0.conf" in call_args
-
-    @pytest.mark.asyncio
-    @patch("keriguard.core.systeming.supports_dbus_systemd")
-    @patch("keriguard.core.systeming.asyncio.create_subprocess_exec")
-    async def test_control_wireguard_macos_stop_failure(
-        self, mock_subprocess, mock_supports
-    ):
-        """Test that macOS STOP raises WireGuardControlError on wg-quick down failure."""
-        mock_supports.return_value = False
-
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b"interface not found"))
-        mock_proc.returncode = 1
-        mock_subprocess.return_value = mock_proc
-
-        with patch("keriguard.core.systeming.platform.system", return_value="Darwin"):
-            with pytest.raises(
-                WireGuardControlError,
-                match="wg-quick down failed for",
-            ):
+            with pytest.raises(WireGuardControlError, match="start_failed"):
                 await control_wireguard(
-                    WireGuardAction.STOP,
-                    "wg0",
-                    config_path="/etc/wireguard/wg0.conf",
+                    WireGuardAction.START, "wg0", config_path=str(config_path)
                 )
+
+    @pytest.mark.asyncio
+    @patch("keriguard.core.systeming.supports_dbus_systemd")
+    @patch("keriguard.core.systeming._send_helper_request")
+    async def test_control_wireguard_macos_start_not_approved(
+        self, mock_send, mock_supports, tmp_path
+    ):
+        """Test that WireGuardNotApprovedError from the helper propagates distinctly."""
+        mock_supports.return_value = False
+        mock_send.side_effect = WireGuardNotApprovedError(
+            "KERIGuard Helper's network extension has not been approved in System Settings"
+        )
+
+        config_path = tmp_path / "wg0.conf"
+        config_path.write_text("[Interface]\nPrivateKey = abc\n")
+
+        with patch("keriguard.core.systeming.platform.system", return_value="Darwin"):
+            with pytest.raises(WireGuardNotApprovedError):
+                await control_wireguard(
+                    WireGuardAction.START, "wg0", config_path=str(config_path)
+                )
+
+    @pytest.mark.asyncio
+    @patch("keriguard.core.systeming.supports_dbus_systemd")
+    @patch("keriguard.core.systeming._send_helper_request")
+    async def test_control_wireguard_macos_stop_sends_stop_action(
+        self, mock_send, mock_supports, tmp_path
+    ):
+        """Test that macOS STOP sends a 'stop' IPC action with no config payload."""
+        mock_supports.return_value = False
+        mock_send.return_value = {"ok": True, "state": "down"}
+
+        config_path = tmp_path / "wg0.conf"
+        config_path.write_text("[Interface]\nPrivateKey = abc\n")
+
+        with patch("keriguard.core.systeming.platform.system", return_value="Darwin"):
+            result = await control_wireguard(
+                WireGuardAction.STOP, "wg0", config_path=str(config_path)
+            )
+
+        assert result == {"ok": True, "state": "down"}
+        mock_send.assert_called_once_with("stop", "wg0")
+
+    @pytest.mark.asyncio
+    @patch("keriguard.core.systeming.supports_dbus_systemd")
+    @patch("keriguard.core.systeming._send_helper_request")
+    async def test_control_wireguard_macos_disable_also_sends_stop_action(
+        self, mock_send, mock_supports, tmp_path
+    ):
+        """Test that DISABLE (unlike the no-op ENABLE) actually stops the tunnel."""
+        mock_supports.return_value = False
+        mock_send.return_value = {"ok": True, "state": "down"}
+
+        config_path = tmp_path / "wg0.conf"
+        config_path.write_text("[Interface]\nPrivateKey = abc\n")
+
+        with patch("keriguard.core.systeming.platform.system", return_value="Darwin"):
+            await control_wireguard(
+                WireGuardAction.DISABLE, "wg0", config_path=str(config_path)
+            )
+
+        mock_send.assert_called_once_with("stop", "wg0")
 
     @pytest.mark.asyncio
     @patch("keriguard.core.systeming.supports_dbus_systemd")
@@ -687,6 +732,160 @@ class TestControlWireguard:
             match="Unsupported platform or missing system D-Bus/systemd: Linux",
         ):
             await control_wireguard(WireGuardAction.START, "wg0")
+
+
+# ============================================================================
+# Test _send_helper_request (KERIGuard Helper IPC client)
+# ============================================================================
+
+
+class TestSendHelperRequest:
+    """Test the Unix domain socket IPC client against a real local socket
+    server, rather than mocking asyncio internals — this exercises the
+    actual line-delimited JSON framing end to end.
+
+    Uses a fixture rooted directly under /tmp rather than pytest's `tmp_path`
+    (which nests under /private/var/folders/.../pytest-of-.../pytest-N/...) —
+    AF_UNIX socket paths are capped at ~104 bytes on macOS/BSD and the deeper
+    path reliably overflows that limit.
+    """
+
+    @pytest.fixture
+    def socket_dir(self):
+        d = tempfile.mkdtemp(dir="/tmp")
+        try:
+            yield Path(d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    @staticmethod
+    async def _serve_once(socket_path, response_line: bytes | None):
+        """Start a one-shot Unix socket server that reads a request line and
+        writes back `response_line` (or closes immediately if None)."""
+        received = {}
+
+        async def handle(reader, writer):
+            line = await reader.readline()
+            received["request"] = json.loads(line)
+            if response_line is not None:
+                writer.write(response_line)
+                await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_unix_server(handle, path=str(socket_path))
+        return server, received
+
+    @pytest.mark.asyncio
+    async def test_send_helper_request_success(self, socket_dir):
+        socket_path = socket_dir / "helper.sock"
+        server, received = await self._serve_once(
+            socket_path,
+            json.dumps({"version": 1, "ok": True, "state": "up"}).encode() + b"\n",
+        )
+        try:
+            with patch("keriguard.core.systeming._HELPER_SOCKET_PATH", socket_path):
+                response = await _send_helper_request(
+                    "start", "wg0", config="[Interface]\n"
+                )
+        finally:
+            server.close()
+            await server.wait_closed()
+
+        assert response == {"version": 1, "ok": True, "state": "up"}
+        assert received["request"] == {
+            "version": 1,
+            "action": "start",
+            "interface": "wg0",
+            "config": "[Interface]\n",
+        }
+
+    @pytest.mark.asyncio
+    async def test_send_helper_request_omits_config_when_none(self, socket_dir):
+        socket_path = socket_dir / "helper.sock"
+        server, received = await self._serve_once(
+            socket_path,
+            json.dumps({"version": 1, "ok": True, "state": "down"}).encode() + b"\n",
+        )
+        try:
+            with patch("keriguard.core.systeming._HELPER_SOCKET_PATH", socket_path):
+                await _send_helper_request("stop", "wg0")
+        finally:
+            server.close()
+            await server.wait_closed()
+
+        assert received["request"] == {
+            "version": 1,
+            "action": "stop",
+            "interface": "wg0",
+        }
+
+    @pytest.mark.asyncio
+    async def test_send_helper_request_generic_error(self, socket_dir):
+        socket_path = socket_dir / "helper.sock"
+        server, _ = await self._serve_once(
+            socket_path,
+            json.dumps(
+                {"version": 1, "ok": False, "error": "start_failed: boom"}
+            ).encode()
+            + b"\n",
+        )
+        try:
+            with patch("keriguard.core.systeming._HELPER_SOCKET_PATH", socket_path):
+                with pytest.raises(WireGuardControlError, match="start_failed: boom"):
+                    await _send_helper_request("start", "wg0", config="[Interface]\n")
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    @pytest.mark.asyncio
+    async def test_send_helper_request_not_approved(self, socket_dir):
+        socket_path = socket_dir / "helper.sock"
+        server, _ = await self._serve_once(
+            socket_path,
+            json.dumps({"version": 1, "ok": False, "error": "not_approved"}).encode()
+            + b"\n",
+        )
+        try:
+            with patch("keriguard.core.systeming._HELPER_SOCKET_PATH", socket_path):
+                with pytest.raises(WireGuardNotApprovedError):
+                    await _send_helper_request("start", "wg0", config="[Interface]\n")
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    @pytest.mark.asyncio
+    async def test_send_helper_request_no_response_line(self, socket_dir):
+        """Server closes the connection without writing anything back."""
+        socket_path = socket_dir / "helper.sock"
+        server, _ = await self._serve_once(socket_path, None)
+        try:
+            with patch("keriguard.core.systeming._HELPER_SOCKET_PATH", socket_path):
+                with pytest.raises(WireGuardControlError, match="without a response"):
+                    await _send_helper_request("status", "wg0")
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    @pytest.mark.asyncio
+    async def test_send_helper_request_malformed_response(self, socket_dir):
+        socket_path = socket_dir / "helper.sock"
+        server, _ = await self._serve_once(socket_path, b"not json\n")
+        try:
+            with patch("keriguard.core.systeming._HELPER_SOCKET_PATH", socket_path):
+                with pytest.raises(WireGuardControlError, match="Invalid response"):
+                    await _send_helper_request("status", "wg0")
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    @pytest.mark.asyncio
+    async def test_send_helper_request_socket_missing_is_not_approved(self, socket_dir):
+        """A missing socket (helper not running) is the same signal as an
+        explicit not_approved response, per keriguard-helper's PLAN.md."""
+        socket_path = socket_dir / "does-not-exist.sock"
+        with patch("keriguard.core.systeming._HELPER_SOCKET_PATH", socket_path):
+            with pytest.raises(WireGuardNotApprovedError, match="not reachable"):
+                await _send_helper_request("status", "wg0")
 
 
 # ============================================================================
@@ -831,3 +1030,20 @@ class TestWireGuardControlError:
         """Test that WireGuardControlError can be raised and caught."""
         with pytest.raises(WireGuardControlError, match="test"):
             raise WireGuardControlError("test")
+
+
+class TestWireGuardNotApprovedError:
+    """Test WireGuardNotApprovedError exception."""
+
+    def test_wireguard_not_approved_error_is_control_error(self):
+        """Test that WireGuardNotApprovedError is a WireGuardControlError, so
+        existing generic `except WireGuardControlError` catches also catch it."""
+        error = WireGuardNotApprovedError("not approved")
+        assert isinstance(error, WireGuardControlError)
+
+    def test_wireguard_not_approved_error_distinguishable(self):
+        """Test that callers can distinguish it from a generic WireGuardControlError."""
+        try:
+            raise WireGuardNotApprovedError("not approved")
+        except WireGuardControlError as e:
+            assert isinstance(e, WireGuardNotApprovedError)

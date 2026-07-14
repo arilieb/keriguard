@@ -6,18 +6,19 @@ Cross-platform WireGuard interface control.
 
 macOS strategy
 --------------
-Initial bring-up / teardown uses ``sudo wg-quick up/down``.  Hot
-reconfiguration uses ``wg-quick strip | sudo wg syncconf`` to apply
-updated configs to a running interface without tunnel teardown.
+Control is delegated to KERIGuard Helper (a companion macOS app + Network
+Extension — see the ``keriguard-helper`` repo) over a line-delimited JSON
+IPC protocol on a local Unix domain socket. The helper owns the actual
+WireGuard tunnel via ``NETunnelProviderManager``/WireGuardKit — no sudo, no
+``wg-quick``, no utun-device resolution needed on this side.
 """
 
 import asyncio
+import json
 import logging
 import os
 import platform
 import re
-import shutil
-import subprocess
 from enum import StrEnum
 from pathlib import Path
 
@@ -37,59 +38,11 @@ SYSTEMD_MANAGER = "org.freedesktop.systemd1.Manager"
 
 WG_IFACE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
-_WG_UAPI_SOCK_DIR = Path("/var/run/wireguard")
-
-
-# ---------------------------------------------------------------------------
-# Resolve WireGuard tool paths once at import time.
-#
-# On Apple Silicon Macs, Homebrew installs to /opt/homebrew/bin/ which is
-# NOT on sudo's secure_path.  Using absolute paths ensures subprocess calls
-# (especially those prefixed with "sudo") find the correct binaries.
-# ---------------------------------------------------------------------------
-
-
-def _resolve_utun_name(interface: str) -> str:
-    """Resolve a wg-quick alias (e.g. 'wg0') to the real utun device name.
-
-    On macOS, wg-quick writes the real device name to
-    ``/var/run/wireguard/<interface>.name``.  The ``wg`` CLI needs the real
-    name to find the UAPI socket (``<utun>.sock``).
-
-    The .name file is typically root-owned 600.  Falls back to
-    ``sudo wg show interfaces`` (covered by the existing sudoers rule)
-    when the file cannot be read; if exactly one WireGuard interface is
-    running, that must be ours.
-
-    Returns the real name, or the original interface name unchanged
-    (correct on Linux where interface names are used directly).
-    """
-    name_file = _WG_UAPI_SOCK_DIR / f"{interface}.name"
-    try:
-        return name_file.read_text().strip()
-    except FileNotFoundError:
-        return interface
-    except PermissionError:
-        result = subprocess.run(
-            ["sudo", _WG_BIN, "show", "interfaces"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            ifaces = result.stdout.strip().split()
-            if len(ifaces) == 1:
-                return ifaces[0]
-        return interface
-
-
-def _resolve_tool(name: str) -> str:
-    """Return the absolute path to a CLI tool, or fall back to the bare name."""
-    path = shutil.which(name)
-    return path if path is not None else name
-
-
-_WG_BIN = _resolve_tool("wg")
-_WG_QUICK_BIN = _resolve_tool("wg-quick")
+# Must match IPCServer.defaultSocketPath() in keriguard-helper.
+_HELPER_SOCKET_PATH = (
+    Path.home() / "Library" / "Application Support" / "KERIGuard" / "helper.sock"
+)
+_HELPER_PROTOCOL_VERSION = 1
 
 
 class WireGuardAction(StrEnum):
@@ -103,6 +56,17 @@ class WireGuardAction(StrEnum):
 
 
 class WireGuardControlError(RuntimeError):
+    pass
+
+
+class WireGuardNotApprovedError(WireGuardControlError):
+    """Raised when KERIGuard Helper's network extension has not yet been
+    approved in System Settings, or the helper is not running at all.
+
+    Callers should treat this as a distinct, actionable status (surfaced
+    upstream as ``pending_ne_approval``) rather than a generic failure.
+    """
+
     pass
 
 
@@ -162,151 +126,64 @@ async def call_systemd(action: WireGuardAction, interface: str) -> object:
 
 
 # ---------------------------------------------------------------------------
-# macOS: wg-quick (bring-up/teardown) + wg syncconf (hot reconfiguration)
+# macOS: KERIGuard Helper IPC client
 # ---------------------------------------------------------------------------
 
 
-async def _is_wireguard_up(interface: str) -> bool:
-    """Return True if the named WireGuard interface is currently running.
+async def _send_helper_request(
+    action: str, interface: str, config: str | None = None
+) -> dict:
+    """Send a line-delimited JSON request to KERIGuard Helper's Unix domain
+    socket IPC server and return the parsed response dict.
 
-    On macOS, wireguard-go names its UAPI socket after the real utun device
-    (e.g. ``utun6.sock``) while wg-quick records the mapping in a ``.name``
-    file (e.g. ``wg0.name``).
-
-    We check that:
-    1. The .name file exists
-    2. The corresponding .sock file also exists (guards against stale name
-       files left by a crash or unclean teardown)
-
-    If both are present the interface is up.  Otherwise we fall back to
-    ``sudo wg show``.
+    See ``keriguard-helper``'s PLAN.md for the wire protocol. Connection
+    failure (socket missing/refused — the helper isn't running) is treated
+    the same as an explicit ``not_approved`` response, per that protocol.
     """
-    name_file = _WG_UAPI_SOCK_DIR / f"{interface}.name"
-    if name_file.exists():
-        # Try to read the real utun name and verify the socket is live
-        try:
-            real_name = name_file.read_text().strip()
-            sock = _WG_UAPI_SOCK_DIR / f"{real_name}.sock"
-            if sock.exists():
-                _log.debug(
-                    f"_is_wireguard_up({interface!r}): name file maps to "
-                    f"{real_name!r}, socket exists — interface is up"
-                )
-                return True
-            else:
-                _log.debug(
-                    f"_is_wireguard_up({interface!r}): name file exists but "
-                    f"socket {sock} is missing — stale name file"
-                )
-        except PermissionError:
-            # macOS: wg-quick creates the .name file as root (600).  We
-            # can't read its contents, so we can't directly resolve the
-            # utun name.  Use `sudo wg show interfaces` instead — it lists
-            # every running utun and is covered by the existing sudoers rule.
-            _log.debug(
-                f"_is_wireguard_up({interface!r}): name file unreadable — "
-                f"checking via sudo wg show interfaces"
-            )
-            iface_proc = await asyncio.create_subprocess_exec(
-                "sudo",
-                _WG_BIN,
-                "show",
-                "interfaces",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            iface_out, _ = await iface_proc.communicate()
-            if iface_proc.returncode == 0:
-                running = iface_out.decode().split()
-                if len(running) == 1:
-                    # Unambiguous: only one interface, verify its socket is live.
-                    sock = _WG_UAPI_SOCK_DIR / f"{running[0]}.sock"
-                    _log.debug(
-                        f"_is_wireguard_up({interface!r}): resolved to "
-                        f"{running[0]!r}, socket {'exists' if sock.exists() else 'missing'}"
-                    )
-                    return sock.exists()
-                if running:
-                    # Multiple interfaces running; the .name file for our alias
-                    # exists, so our interface was brought up by wg-quick.
-                    _log.debug(
-                        f"_is_wireguard_up({interface!r}): {len(running)} interface(s) "
-                        f"running, .name file present — assuming interface is up"
-                    )
-                    return True
-            return False
+    payload = {
+        "version": _HELPER_PROTOCOL_VERSION,
+        "action": action,
+        "interface": interface,
+    }
+    if config is not None:
+        payload["config"] = config
 
-    # Fallback: ask wg directly.  Works on Linux where the interface name IS
-    # the real kernel name.  On macOS this path is taken only when the .name
-    # file does not exist (i.e. the interface was never brought up).
-    proc = await asyncio.create_subprocess_exec(
-        "sudo",
-        _WG_BIN,
-        "show",
-        interface,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    is_up = proc.returncode == 0
-    if not is_up:
-        _log.debug(
-            f"_is_wireguard_up({interface!r}) returned False — "
-            f"rc={proc.returncode}, stderr={stderr.decode().strip()!r}"
-        )
-    return is_up
+    try:
+        reader, writer = await asyncio.open_unix_connection(str(_HELPER_SOCKET_PATH))
+    except OSError as e:
+        raise WireGuardNotApprovedError(
+            f"KERIGuard Helper is not reachable at {_HELPER_SOCKET_PATH}: {e}"
+        ) from e
 
+    try:
+        writer.write((json.dumps(payload) + "\n").encode())
+        await writer.drain()
+        line = await reader.readline()
+    finally:
+        writer.close()
 
-async def _mac_syncconf(
-    interface: str, config_path: str, real_iface: str | None = None
-) -> None:
-    """Apply a config file to a running WireGuard interface without disruption.
-
-    Runs ``sudo wg-quick strip`` to remove Address/DNS/routing directives
-    (which only wg-quick understands), then pipes the result into
-    ``sudo wg syncconf``.  No tunnel teardown occurs, so existing sessions
-    are preserved.
-
-    On macOS, the ``wg`` tool addresses interfaces by their real utun device
-    name (e.g. ``utun6``), not the wg-quick alias (``wg0``).  Pass
-    ``real_iface`` when already known (e.g. extracted from a wg-quick error
-    message); otherwise it is resolved via the ``.name`` file.
-    """
-    if real_iface is None:
-        real_iface = _resolve_utun_name(interface)
-
-    # wg-quick unconditionally checks for root before any subcommand, so
-    # 'strip' must also be run via sudo.
-    strip = await asyncio.create_subprocess_exec(
-        "sudo",
-        _WG_QUICK_BIN,
-        "strip",
-        config_path,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stripped, strip_err = await strip.communicate()
-    if strip.returncode != 0:
+    if not line:
         raise WireGuardControlError(
-            f"wg-quick strip failed for {config_path!r}: {strip_err.decode().strip()}"
+            "KERIGuard Helper closed the connection without a response"
         )
 
-    sync = await asyncio.create_subprocess_exec(
-        "sudo",
-        _WG_BIN,
-        "syncconf",
-        real_iface,
-        "/dev/stdin",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, sync_err = await sync.communicate(input=stripped)
-    if sync.returncode != 0:
+    try:
+        response = json.loads(line)
+    except json.JSONDecodeError as e:
         raise WireGuardControlError(
-            f"wg syncconf failed for {interface!r} (device {real_iface}): "
-            f"{sync_err.decode().strip()}"
-        )
+            f"Invalid response from KERIGuard Helper: {line!r}"
+        ) from e
+
+    if not response.get("ok"):
+        error = response.get("error", "unknown_error")
+        if error == "not_approved":
+            raise WireGuardNotApprovedError(
+                "KERIGuard Helper's network extension has not been approved "
+                "in System Settings"
+            )
+        raise WireGuardControlError(f"KERIGuard Helper returned error: {error}")
+
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +203,7 @@ async def control_wireguard(
 
     if system == "Darwin":
         if action == WireGuardAction.ENABLE:
-            return  # launchd persistence is out of scope for the PoC
+            return  # login item registration + NE approval are owned by KERIGuard Helper
 
         if config_path is None:
             raise WireGuardControlError(
@@ -340,56 +217,25 @@ async def control_wireguard(
                 | WireGuardAction.RELOAD
                 | WireGuardAction.RELOAD_OR_RESTART
             ):
-                if await _is_wireguard_up(interface):
-                    return await _mac_syncconf(interface, config_path)
-                proc = await asyncio.create_subprocess_exec(
-                    "sudo",
-                    _WG_QUICK_BIN,
-                    "up",
-                    config_path,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _, err = await proc.communicate()
-                if proc.returncode != 0:
-                    err_str = err.decode().strip()
-                    # Interface already up but _is_wireguard_up missed it
-                    # (root-owned /var/run/wireguard/ files not visible to user process).
-                    # Fall back to hot reconfigure rather than failing.
-                    if "already exists" in err_str:
-                        # wg-quick reports e.g. "wg0' already exists as `utun4'"
-                        # Extract the real utun name so wg syncconf gets the right device.
-                        m = re.search(r"already exists as `([^']+)'", err_str)
-                        real_iface = m.group(1) if m else None
-                        _log.debug(
-                            f"wg-quick up: {interface!r} already exists as "
-                            f"{real_iface!r} — falling back to syncconf"
-                        )
-                        return await _mac_syncconf(
-                            interface, config_path, real_iface=real_iface
-                        )
+                try:
+                    config_text = Path(config_path).read_text()
+                except OSError as e:
                     raise WireGuardControlError(
-                        f"wg-quick up failed for {config_path!r}: {err_str}"
-                    )
+                        f"Could not read config file {config_path!r}: {e}"
+                    ) from e
+                # The helper has no notion of a hot in-place reconfigure — any
+                # action beyond an initial START is a full stop-then-start of
+                # the NETunnelProviderManager-owned tunnel with the new config.
+                ipc_action = "start" if action == WireGuardAction.START else "restart"
+                return await _send_helper_request(
+                    ipc_action, interface, config=config_text
+                )
 
             case WireGuardAction.STOP | WireGuardAction.DISABLE:
-                proc = await asyncio.create_subprocess_exec(
-                    "sudo",
-                    _WG_QUICK_BIN,
-                    "down",
-                    config_path,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _, err = await proc.communicate()
-                if proc.returncode != 0:
-                    raise WireGuardControlError(
-                        f"wg-quick down failed for {config_path!r}: {err.decode().strip()}"
-                    )
+                return await _send_helper_request("stop", interface)
 
             case _:
                 raise WireGuardControlError(f"Unsupported action for macOS: {action!r}")
-        return
 
     if system == "Windows":
         raise WireGuardControlError(
