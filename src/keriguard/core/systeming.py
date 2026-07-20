@@ -23,7 +23,7 @@ from enum import StrEnum
 from pathlib import Path
 
 try:
-    from dbus_fast import BusType
+    from dbus_fast import BusType, DBusError
     from dbus_fast.aio import MessageBus
 
     _HAS_DBUS = True
@@ -123,6 +123,27 @@ async def call_systemd(action: WireGuardAction, interface: str) -> object:
             return await manager.call_disable_unit_files([unit], False)
         case _:
             raise ValueError(f"Unsupported WireGuard action: {action}")
+
+
+async def _systemd_unit_active(interface: str) -> bool:
+    """Return True if the wg-quick systemd unit for `interface` is active."""
+    unit = wg_quick_unit(interface)
+
+    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    introspection = await bus.introspect(SYSTEMD_SERVICE, SYSTEMD_OBJECT)
+    proxy = bus.get_proxy_object(SYSTEMD_SERVICE, SYSTEMD_OBJECT, introspection)
+    manager = proxy.get_interface(SYSTEMD_MANAGER)
+
+    try:
+        unit_path = await manager.call_load_unit(unit)
+    except DBusError:
+        return False
+
+    unit_introspection = await bus.introspect(SYSTEMD_SERVICE, unit_path)
+    unit_proxy = bus.get_proxy_object(SYSTEMD_SERVICE, unit_path, unit_introspection)
+    props = unit_proxy.get_interface("org.freedesktop.DBus.Properties")
+    active_state = await props.call_get("org.freedesktop.systemd1.Unit", "ActiveState")
+    return active_state.value == "active"
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +271,27 @@ async def control_wireguard(
     raise WireGuardControlError(
         f"Unsupported platform or missing system D-Bus/systemd: {system}"
     )
+
+
+async def is_wireguard_up(interface: str) -> bool:
+    """Return True if the named WireGuard interface is currently up.
+
+    Linux queries the wg-quick systemd unit's ActiveState over D-Bus. macOS
+    asks KERIGuard Helper via the same IPC channel `control_wireguard` uses —
+    an unreachable/unapproved helper is treated as down rather than raised,
+    since callers use this for status display, not control flow.
+    """
+    if supports_dbus_systemd():
+        return await _systemd_unit_active(interface)
+
+    if platform.system() == "Darwin":
+        try:
+            response = await _send_helper_request("status", interface)
+        except WireGuardControlError:
+            return False
+        return response.get("state") == "up"
+
+    return False
 
 
 # ---------------------------------------------------------------------------

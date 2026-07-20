@@ -17,10 +17,12 @@ from keriguard.core.systeming import (
     WireGuardControlError,
     WireGuardNotApprovedError,
     _send_helper_request,
+    _systemd_unit_active,
     call_systemd,
     control_wireguard,
     disable_wireguard,
     enable_wireguard,
+    is_wireguard_up,
     reload_or_restart_wireguard,
     reload_wireguard,
     restart_wireguard,
@@ -886,6 +888,187 @@ class TestSendHelperRequest:
         with patch("keriguard.core.systeming._HELPER_SOCKET_PATH", socket_path):
             with pytest.raises(WireGuardNotApprovedError, match="not reachable"):
                 await _send_helper_request("status", "wg0")
+
+
+# ============================================================================
+# Test _systemd_unit_active / is_wireguard_up
+# ============================================================================
+
+
+class TestSystemdUnitActive:
+    """Test the D-Bus ActiveState lookup used by is_wireguard_up on Linux."""
+
+    @pytest.mark.asyncio
+    async def test_systemd_unit_active_true(self):
+        mock_active_state = Mock()
+        mock_active_state.value = "active"
+
+        mock_props = AsyncMock()
+        mock_props.call_get = AsyncMock(return_value=mock_active_state)
+
+        mock_unit_proxy = Mock()
+        mock_unit_proxy.get_interface = Mock(return_value=mock_props)
+
+        mock_manager = AsyncMock()
+        mock_manager.call_load_unit = AsyncMock(
+            return_value="/org/freedesktop/systemd1/unit/wg_2dquick_40wg0_2eservice"
+        )
+
+        mock_manager_proxy = Mock()
+        mock_manager_proxy.get_interface = Mock(return_value=mock_manager)
+
+        mock_bus = AsyncMock()
+        mock_bus.introspect = AsyncMock(return_value="<introspection/>")
+        mock_bus.get_proxy_object = Mock(
+            side_effect=[mock_manager_proxy, mock_unit_proxy]
+        )
+
+        with patch("keriguard.core.systeming.MessageBus") as mock_message_bus_class:
+            mock_message_bus_instance = Mock()
+            mock_message_bus_instance.connect = AsyncMock(return_value=mock_bus)
+            mock_message_bus_class.return_value = mock_message_bus_instance
+
+            result = await _systemd_unit_active("wg0")
+
+        assert result is True
+        mock_manager.call_load_unit.assert_called_once_with("wg-quick@wg0.service")
+        mock_props.call_get.assert_called_once_with(
+            "org.freedesktop.systemd1.Unit", "ActiveState"
+        )
+
+    @pytest.mark.asyncio
+    async def test_systemd_unit_active_inactive(self):
+        mock_active_state = Mock()
+        mock_active_state.value = "inactive"
+
+        mock_props = AsyncMock()
+        mock_props.call_get = AsyncMock(return_value=mock_active_state)
+
+        mock_unit_proxy = Mock()
+        mock_unit_proxy.get_interface = Mock(return_value=mock_props)
+
+        mock_manager = AsyncMock()
+        mock_manager.call_load_unit = AsyncMock(return_value="/some/unit/path")
+
+        mock_manager_proxy = Mock()
+        mock_manager_proxy.get_interface = Mock(return_value=mock_manager)
+
+        mock_bus = AsyncMock()
+        mock_bus.introspect = AsyncMock(return_value="<introspection/>")
+        mock_bus.get_proxy_object = Mock(
+            side_effect=[mock_manager_proxy, mock_unit_proxy]
+        )
+
+        with patch("keriguard.core.systeming.MessageBus") as mock_message_bus_class:
+            mock_message_bus_instance = Mock()
+            mock_message_bus_instance.connect = AsyncMock(return_value=mock_bus)
+            mock_message_bus_class.return_value = mock_message_bus_instance
+
+            result = await _systemd_unit_active("wg0")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_systemd_unit_active_no_such_unit(self):
+        """A unit that was never started raises DBusError on load; treat as down."""
+        from dbus_fast import DBusError
+
+        mock_manager = AsyncMock()
+        mock_manager.call_load_unit = AsyncMock(
+            side_effect=DBusError("org.freedesktop.systemd1.NoSuchUnit", "not found")
+        )
+
+        mock_manager_proxy = Mock()
+        mock_manager_proxy.get_interface = Mock(return_value=mock_manager)
+
+        mock_bus = AsyncMock()
+        mock_bus.introspect = AsyncMock(return_value="<introspection/>")
+        mock_bus.get_proxy_object = Mock(return_value=mock_manager_proxy)
+
+        with patch("keriguard.core.systeming.MessageBus") as mock_message_bus_class:
+            mock_message_bus_instance = Mock()
+            mock_message_bus_instance.connect = AsyncMock(return_value=mock_bus)
+            mock_message_bus_class.return_value = mock_message_bus_instance
+
+            result = await _systemd_unit_active("wg0")
+
+        assert result is False
+
+
+class TestIsWireguardUp:
+    """Test the cross-platform is_wireguard_up dispatcher."""
+
+    @pytest.mark.asyncio
+    @patch("keriguard.core.systeming.supports_dbus_systemd")
+    @patch("keriguard.core.systeming._systemd_unit_active")
+    async def test_is_wireguard_up_linux(self, mock_active, mock_supports):
+        mock_supports.return_value = True
+        mock_active.return_value = True
+
+        result = await is_wireguard_up("wg0")
+
+        assert result is True
+        mock_active.assert_called_once_with("wg0")
+
+    @pytest.mark.asyncio
+    @patch("keriguard.core.systeming.supports_dbus_systemd")
+    @patch("keriguard.core.systeming.platform.system")
+    @patch("keriguard.core.systeming._send_helper_request")
+    async def test_is_wireguard_up_macos_up(
+        self, mock_send, mock_system, mock_supports
+    ):
+        mock_supports.return_value = False
+        mock_system.return_value = "Darwin"
+        mock_send.return_value = {"ok": True, "state": "up"}
+
+        result = await is_wireguard_up("wg0")
+
+        assert result is True
+        mock_send.assert_called_once_with("status", "wg0")
+
+    @pytest.mark.asyncio
+    @patch("keriguard.core.systeming.supports_dbus_systemd")
+    @patch("keriguard.core.systeming.platform.system")
+    @patch("keriguard.core.systeming._send_helper_request")
+    async def test_is_wireguard_up_macos_down(
+        self, mock_send, mock_system, mock_supports
+    ):
+        mock_supports.return_value = False
+        mock_system.return_value = "Darwin"
+        mock_send.return_value = {"ok": True, "state": "down"}
+
+        result = await is_wireguard_up("wg0")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    @patch("keriguard.core.systeming.supports_dbus_systemd")
+    @patch("keriguard.core.systeming.platform.system")
+    @patch("keriguard.core.systeming._send_helper_request")
+    async def test_is_wireguard_up_macos_not_approved_is_down(
+        self, mock_send, mock_system, mock_supports
+    ):
+        """Helper unreachable/not-approved is treated as down, not raised."""
+        mock_supports.return_value = False
+        mock_system.return_value = "Darwin"
+        mock_send.side_effect = WireGuardNotApprovedError("not approved")
+
+        result = await is_wireguard_up("wg0")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    @patch("keriguard.core.systeming.supports_dbus_systemd")
+    @patch("keriguard.core.systeming.platform.system")
+    async def test_is_wireguard_up_unsupported_platform(
+        self, mock_system, mock_supports
+    ):
+        mock_supports.return_value = False
+        mock_system.return_value = "SunOS"
+
+        result = await is_wireguard_up("wg0")
+
+        assert result is False
 
 
 # ============================================================================
