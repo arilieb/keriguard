@@ -813,41 +813,9 @@ class WireguardConfigWriter:
             # Generate configuration text
             content = WireguardConfigWriter.write_stream(config)
 
-            # Write to file, falling back to sudo tee for root-owned directories.
-            # After sudo tee, transfer ownership back to the current user so the
-            # process can read the file back (e.g. for connection-credential processing).
-            # wg-quick runs as root and can read any file regardless of ownership.
-            try:
-                with open(path, "w") as f:
-                    f.write(content)
-                path.chmod(0o600)
-            except PermissionError:
-                import getpass
-
-                _tee = shutil.which("tee") or "/usr/bin/tee"
-                result = subprocess.run(
-                    ["sudo", _tee, str(path)],
-                    input=content.encode(),
-                    capture_output=True,
-                )
-                if result.returncode != 0:
-                    raise PermissionError(
-                        f"sudo tee {path}: {result.stderr.decode().strip()}"
-                    )
-                # Transfer ownership to current user, then chmod as that user.
-                # This lets the process read the file back while wg-quick (root)
-                # can still read it.  Falls back to chmod 600 if chown is not
-                # in sudoers (file stays root-owned and unreadable by the user,
-                # but wg-quick still works).
-                _chown = shutil.which("chown") or "/usr/sbin/chown"
-                chown_result = subprocess.run(
-                    ["sudo", _chown, getpass.getuser(), str(path)],
-                    capture_output=True,
-                )
-                if chown_result.returncode == 0:
-                    path.chmod(0o600)
-                else:
-                    subprocess.run(["sudo", "chmod", "600", str(path)], check=False)
+            # Write to file
+            with open(path, "w") as f:
+                f.write(content)
 
             logger.info(f"Wrote configuration to {path}")
 
