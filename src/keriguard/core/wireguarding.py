@@ -7,7 +7,6 @@ Wireguard configuration management with KERI integration.
 
 import pysodium
 import shutil
-import subprocess
 from keri import help
 from keri.core.signing import Signer
 from dataclasses import dataclass, field
