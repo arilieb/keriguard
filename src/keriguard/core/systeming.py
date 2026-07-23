@@ -98,8 +98,12 @@ def wg_quick_unit(interface: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def call_systemd(action: WireGuardAction, interface: str) -> object:
+async def call_wireguard_systemd(action: WireGuardAction, interface: str) -> object:
     unit = wg_quick_unit(interface)
+    return await call_systemd_unit(action, unit)
+
+
+async def call_systemd_unit(action: WireGuardAction, unit: str) -> object:
 
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
     introspection = await bus.introspect(SYSTEMD_SERVICE, SYSTEMD_OBJECT)
@@ -218,7 +222,7 @@ async def control_wireguard(
     config_path: str | None = None,
 ) -> object:
     if supports_dbus_systemd():
-        return await call_systemd(action, interface)
+        return await call_wireguard_systemd(action, interface)
 
     system = platform.system()
 
@@ -329,3 +333,81 @@ async def enable_wireguard(interface: str, config_path: str | None = None) -> ob
 
 async def disable_wireguard(interface: str, config_path: str | None = None) -> object:
     return await control_wireguard(WireGuardAction.DISABLE, interface, config_path)
+
+
+# KERIGuard Guardian service control
+GUARDIAN_UNIT = "keriguard-guardian.service"
+
+
+async def start_guardian() -> object:
+    """Start the keriguard-guardian systemd service."""
+    return await call_systemd_unit(WireGuardAction.START, GUARDIAN_UNIT)
+
+
+async def stop_guardian() -> object:
+    """Stop the keriguard-guardian systemd service."""
+    return await call_systemd_unit(WireGuardAction.STOP, GUARDIAN_UNIT)
+
+
+async def restart_guardian() -> object:
+    """Restart the keriguard-guardian systemd service."""
+    return await call_systemd_unit(WireGuardAction.RESTART, GUARDIAN_UNIT)
+
+
+async def reload_guardian() -> object:
+    """Reload the keriguard-guardian systemd service."""
+    return await call_systemd_unit(WireGuardAction.RELOAD, GUARDIAN_UNIT)
+
+
+async def reload_or_restart_guardian() -> object:
+    """Reload or restart the keriguard-guardian systemd service."""
+    return await call_systemd_unit(WireGuardAction.RELOAD_OR_RESTART, GUARDIAN_UNIT)
+
+
+async def enable_guardian() -> object:
+    """Enable the keriguard-guardian systemd service."""
+    return await call_systemd_unit(WireGuardAction.ENABLE, GUARDIAN_UNIT)
+
+
+async def disable_guardian() -> object:
+    """Disable the keriguard-guardian systemd service."""
+    return await call_systemd_unit(WireGuardAction.DISABLE, GUARDIAN_UNIT)
+
+
+# KERIGuard Sentinel service control
+SENTINEL_UNIT = "keriguard-sentinel.service"
+
+
+async def start_sentinel() -> object:
+    """Start the keriguard-sentinel systemd service."""
+    return await call_systemd_unit(WireGuardAction.START, SENTINEL_UNIT)
+
+
+async def stop_sentinel() -> object:
+    """Stop the keriguard-sentinel systemd service."""
+    return await call_systemd_unit(WireGuardAction.STOP, SENTINEL_UNIT)
+
+
+async def restart_sentinel() -> object:
+    """Restart the keriguard-sentinel systemd service."""
+    return await call_systemd_unit(WireGuardAction.RESTART, SENTINEL_UNIT)
+
+
+async def reload_sentinel() -> object:
+    """Reload the keriguard-sentinel systemd service."""
+    return await call_systemd_unit(WireGuardAction.RELOAD, SENTINEL_UNIT)
+
+
+async def reload_or_restart_sentinel() -> object:
+    """Reload or restart the keriguard-sentinel systemd service."""
+    return await call_systemd_unit(WireGuardAction.RELOAD_OR_RESTART, SENTINEL_UNIT)
+
+
+async def enable_sentinel() -> object:
+    """Enable the keriguard-sentinel systemd service."""
+    return await call_systemd_unit(WireGuardAction.ENABLE, SENTINEL_UNIT)
+
+
+async def disable_sentinel() -> object:
+    """Disable the keriguard-sentinel systemd service."""
+    return await call_systemd_unit(WireGuardAction.DISABLE, SENTINEL_UNIT)

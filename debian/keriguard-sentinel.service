@@ -1,0 +1,22 @@
+[Unit]
+Description=KERIGuard Sentinel Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=keriguard
+Group=keriguard
+EnvironmentFile=/etc/default/keriguard-sentinel
+WorkingDirectory=/opt/keriguard/sentinel
+ExecStartPre=+/usr/lib/keriguard/keriguard-fix-permissions.sh
+ExecStart=/opt/keriguard/venv/bin/sentinel start -c ${SENTINEL_CONFIG}
+Restart=on-failure
+RestartSec=10
+
+StandardOutput=append:/var/log/keriguard-sentinel/sentinel.log
+StandardError=append:/var/log/keriguard-sentinel/sentinel.error.log
+SyslogIdentifier=keriguard-sentinel
+
+[Install]
+WantedBy=multi-user.target

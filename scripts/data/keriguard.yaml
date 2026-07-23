@@ -6,7 +6,7 @@
 #
 #   local: false
 #   server:
-#     code: "ABC..."           # server auth code provisioned via Locksmith
+#     auth_key: "ABC..."           # server auth code provisioned via Locksmith
 #   issuer:
 #     aid: "EI6-..."
 #     oobi: "http://witness.example.com/oobi/EI6-.../witness"

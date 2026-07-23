@@ -1,0 +1,27 @@
+#!/usr/bin/make -f
+
+export DH_VIRTUALENV_INSTALL_ROOT=/opt/keriguard
+export PYBUILD_NAME=keriguard
+
+%:
+	dh $@ --with python-virtualenv --buildsystem=dh_virtualenv
+
+override_dh_virtualenv:
+	dh_virtualenv \
+		--python python3.13 \
+		--builtin-venv \
+		--install-suffix venv \
+		--upgrade-pip \
+		--extra-pip-arg "--no-cache-dir"
+
+override_dh_installsystemd:
+	dh_installsystemd --no-enable --no-start --name=keriguard-guardian
+	dh_installsystemd --no-enable --no-start --name=keriguard-sentinel
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -rf debian/keriguard/
+	rm -rf debian/.debhelper/
+	rm -f debian/files
+	rm -f debian/*.substvars
+	rm -f debian/*.debhelper.log

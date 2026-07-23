@@ -57,7 +57,8 @@ parser.add_argument(
 parser.add_argument(
     "--file",
     "-f",
-    required=True,
+    required=False,
+    default=None,
     help="Credential file to load",
 )
 
@@ -83,74 +84,77 @@ async def process(args):
         print("Interface name is required.")
         sys.exit(1)
 
-    data = None
-    with open(args.file, "br") as file:
-        data = file.read()
-
-    if not data:
-        print("KERIGuard credential file is empty or does not exist.")
-        return 1
-
     with existing.existingHab(name=name, alias=alias, base=args.base, bran=bran) as (
         hby,
         hab,
     ):
         kgb = KERIGuardBaser(name=name, base=args.base)
 
-        grant = serdering.SerderKERI(raw=bytes(data))
+        sentinel_name = f"{name}-sentinel"
+        org = connecting.Organizer(hby=hby)
+        results = org.find("alias", sentinel_name)
+        if not results:
+            raise kering.ConfigurationError(
+                f"Sentinel '{sentinel_name}' not found. You must run `kg up` first."
+            )
+        sentinel_aid = results[0].get("id")
 
-        rgy = credentialing.Regery(hby=hby, name=hby.name, base=hby.base, temp=hby.temp)
-        exc = exchanging.Exchanger(hby=hby, handlers=[])
-        verifier = verifying.Verifier(hby=hby, reger=rgy.reger)
-        psr = parsing.Parser(kvy=hby.kvy, tvy=rgy.tvy, vry=verifier, exc=exc)
+        watcher_connector = LocalWatcherConnector(hby, hab, sentinel_aid)
 
-        psr.parse(data)
-        psr.kvy.processEscrows()
-        rgy.tvy.processEscrows()
-        verifier.processEscrows()
+        registrar = kgb.get_registrar()
+        if registrar and registrar.aid in hby.kevers:
+            watcher_connector.watch(registrar.aid, registrar.oobi)
 
-        pserder, pathed = exchanging.cloneMessage(hby, said=grant.said)
-        embeds = grant.ked["e"]
-        acdc = embeds["acdc"]
+        issuer = kgb.get_issuer()
+        if issuer.aid in hby.kevers:
+            watcher_connector.watch(issuer.aid, issuer.oobi)
 
-        for label in ("anc", "reg", "iss", "acdc"):
-            ked = embeds[label]
-            sadder = coring.Sadder(ked=ked)
-            ims = bytearray(sadder.raw) + pathed[label]
-            psr.parseOne(ims=ims)
+        watcher_connector.watch(hab.pre, None)
 
-        creder = serdering.SerderACDC(sad=acdc)
-        if rgy.reger.saved.get(keys=(creder.said,)):
+        if args.file:
+            data = None
+            with open(args.file, "br") as file:
+                data = file.read()
 
-            service = CredService(hby, rgy, kgb, args.export_dir)
-            match creder.schema:
-                case Schema.INTERFACE_SCHEMA:
-                    await service.process_interface_credential(creder.said, creder)
+            if not data:
+                print("KERIGuard credential file is empty or does not exist.")
+                return 1
 
-                    sentinel_name = f"{name}-sentinel"
-                    org = connecting.Organizer(hby=hby)
-                    results = org.find("alias", sentinel_name)
-                    if not results:
-                        raise kering.ConfigurationError(
-                            f"Sentinel '{sentinel_name}' not found. You must run `kg up` first."
-                        )
-                    sentinel_aid = results[0].get("id")
+            grant = serdering.SerderKERI(raw=bytes(data))
 
-                    watcher_connector = LocalWatcherConnector(hby, hab, sentinel_aid)
+            rgy = credentialing.Regery(
+                hby=hby, name=hby.name, base=hby.base, temp=hby.temp
+            )
+            exc = exchanging.Exchanger(hby=hby, handlers=[])
+            verifier = verifying.Verifier(hby=hby, reger=rgy.reger)
+            psr = parsing.Parser(kvy=hby.kvy, tvy=rgy.tvy, vry=verifier, exc=exc)
 
-                    registrar = kgb.get_registrar()
-                    if registrar and registrar.aid in hby.kevers:
-                        watcher_connector.watch(registrar.aid, registrar.oobi)
+            psr.parse(data)
+            psr.kvy.processEscrows()
+            rgy.tvy.processEscrows()
+            verifier.processEscrows()
 
-                    issuer = kgb.get_issuer()
-                    if issuer.aid in hby.kevers:
-                        watcher_connector.watch(issuer.aid, issuer.oobi)
+            pserder, pathed = exchanging.cloneMessage(hby, said=grant.said)
+            embeds = grant.ked["e"]
+            acdc = embeds["acdc"]
 
-                    watcher_connector.watch(hab.pre, None)
+            for label in ("anc", "reg", "iss", "acdc"):
+                ked = embeds[label]
+                sadder = coring.Sadder(ked=ked)
+                ims = bytearray(sadder.raw) + pathed[label]
+                psr.parseOne(ims=ims)
 
-                case _:
-                    print(f"Invalid credential schema: {creder.schema}")
-                    return -1
+            creder = serdering.SerderACDC(sad=acdc)
+            if rgy.reger.saved.get(keys=(creder.said,)):
+
+                service = CredService(hby, rgy, kgb, args.export_dir)
+                match creder.schema:
+                    case Schema.INTERFACE_SCHEMA:
+                        await service.process_interface_credential(creder.said, creder)
+
+                    case _:
+                        print(f"Invalid credential schema: {creder.schema}")
+                        return -1
 
             return 0
 

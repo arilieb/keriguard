@@ -95,7 +95,6 @@ def start(args):
     base_formatter = logging.Formatter(FORMAT)  # basic format
     base_formatter.default_msec_format = None
     help.ogler.baseConsoleHandler.setFormatter(base_formatter)
-    help.ogler.level = logging.getLevelName(args.loglevel)
 
     if args.logfile is not None:
         help.ogler.headDirPath = args.logfile

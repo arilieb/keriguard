@@ -1,0 +1,2 @@
+debian/keriguard-fix-permissions.sh usr/share/keriguard/
+debian/50-keriguard-wireguard.rules usr/share/polkit-1/rules.d/

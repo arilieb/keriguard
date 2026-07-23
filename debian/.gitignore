@@ -1,0 +1,19 @@
+# Build directories
+keriguard/
+tmp/
+.debhelper/
+
+# Generated files
+files
+*.substvars
+*.debhelper.log
+*.debhelper
+
+# Binary artifacts
+*.deb
+*.buildinfo
+*.changes
+
+# Backup files
+*~
+*.bak

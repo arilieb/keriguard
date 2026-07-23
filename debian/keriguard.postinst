@@ -1,0 +1,241 @@
+#!/bin/bash
+set -e
+
+# KERIGuard post-installation script
+# Sets up both Guardian and Sentinel services
+
+case "$1" in
+    configure)
+        echo "Configuring keriguard package..."
+
+        # 1. Set virtualenv permissions
+        echo "Setting virtualenv permissions..."
+        chmod -R 755 /opt/keriguard/venv 2>/dev/null || true
+
+        # 2. Create keriguard user and group if they don't exist
+        echo "Creating keriguard user and group..."
+        if ! getent group keriguard >/dev/null 2>&1; then
+            addgroup --system keriguard
+        fi
+
+        if ! id -u keriguard >/dev/null 2>&1; then
+            adduser --system --group --home /opt/keriguard \
+                --shell /bin/bash --disabled-password \
+                keriguard
+        fi
+
+        # 3. Create directory structure
+        echo "Creating directory structure..."
+        mkdir -p /var/log/keriguard-guardian
+        mkdir -p /var/log/keriguard-sentinel
+        mkdir -p /var/lib/keriguard-guardian/keri
+        mkdir -p /var/lib/keriguard-sentinel/keri
+        mkdir -p /opt/keriguard/guardian/config
+        mkdir -p /opt/keriguard/sentinel/config
+        mkdir -p /etc/keriguard
+        mkdir -p /usr/lib/keriguard
+
+        # 4. Set ownership and permissions
+        echo "Setting ownership and permissions..."
+        chown -R keriguard:keriguard /opt/keriguard
+        chown -R keriguard:keriguard /var/log/keriguard-guardian
+        chown -R keriguard:keriguard /var/log/keriguard-sentinel
+        chown -R keriguard:keriguard /var/lib/keriguard-guardian
+        chown -R keriguard:keriguard /var/lib/keriguard-sentinel
+
+        # 5. Install logrotate configurations
+        echo "Installing logrotate configurations..."
+
+        # Guardian logrotate
+        cat > /etc/logrotate.d/keriguard-guardian <<'EOF'
+/var/log/keriguard-guardian/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 keriguard keriguard
+    sharedscripts
+    postrotate
+        systemctl reload keriguard-guardian > /dev/null 2>&1 || true
+    endscript
+}
+EOF
+
+        # Sentinel logrotate
+        cat > /etc/logrotate.d/keriguard-sentinel <<'EOF'
+/var/log/keriguard-sentinel/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 keriguard keriguard
+    sharedscripts
+    postrotate
+        systemctl reload keriguard-sentinel > /dev/null 2>&1 || true
+    endscript
+}
+EOF
+
+        # 6. Create default environment files if they don't exist
+        echo "Creating default environment files..."
+
+        # Guardian environment file
+        if [ ! -f /etc/default/keriguard-guardian ]; then
+            cat > /etc/default/keriguard-guardian <<'EOF'
+# KERIGuard Guardian Service Configuration
+# IMPORTANT: Update these values before starting the service
+
+# Sentinel AID (REQUIRED - obtain from sentinel service)
+KERIGUARD_SENTINEL_AID=CHANGE_ME
+
+# Directory where sentinel exports KERI events
+KERIGUARD_EXPORT_DIR=/var/lib/sentinel/export
+
+# Polling interval in seconds
+KERIGUARD_POLL_INTERVAL=2.0
+
+# Wireguard configuration directory
+KERIGUARD_CONFIG_DIR=/etc/wireguard
+
+# Service name and alias
+KERIGUARD_NAME=keriguard
+KERIGUARD_ALIAS=keriguard-guardian
+
+# KERI base directory for this guardian
+KERIGUARD_BASE=/var/lib/keriguard-guardian/keri
+
+# Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+KERIGUARD_LOGLEVEL=INFO
+EOF
+            chown root:keriguard /etc/default/keriguard-guardian
+            chmod 640 /etc/default/keriguard-guardian
+        fi
+
+        # Sentinel environment file
+        if [ ! -f /etc/default/keriguard-sentinel ]; then
+            cat > /etc/default/keriguard-sentinel <<'EOF'
+# KERIGuard Sentinel Service Configuration
+# Path to sentinel configuration file
+SENTINEL_CONFIG=/etc/keriguard/sentinel.yaml
+ARCHIMEDES_ENVIRONMENT=development
+EOF
+            chown root:keriguard /etc/default/keriguard-sentinel
+            chmod 640 /etc/default/keriguard-sentinel
+        fi
+
+        # 7. Create sentinel configuration template if it doesn't exist
+        echo "Creating sentinel configuration template..."
+        if [ ! -f /etc/keriguard/sentinel.yaml ]; then
+            cat > /etc/keriguard/sentinel.yaml <<'EOF'
+# Sentinel Service Configuration
+# IMPORTANT: Update these values before starting the service
+
+# Directory to export KERI events (must be accessible by guardian)
+export_dir: /var/lib/sentinel/export
+
+# Polling interval in seconds
+poll_interval: 2.0
+
+# KERI base directory for sentinel
+base_dir: /var/lib/keriguard-sentinel/keri
+
+# Sentinel service name
+name: sentinel
+
+# Additional configuration options
+# (Refer to sentinel package documentation for full options)
+EOF
+            chown root:keriguard /etc/keriguard/sentinel.yaml
+            chmod 640 /etc/keriguard/sentinel.yaml
+        fi
+
+        # Ensure export directory exists and is accessible
+        mkdir -p /var/lib/sentinel/export
+        chmod 755 /var/lib/sentinel/export
+
+        # 8. Create shared KERI directory
+        echo "Creating shared KERI directory..."
+        mkdir -p /usr/local/var/keri
+        chown keriguard:keriguard /usr/local/var/keri
+        chmod 2770 /usr/local/var/keri
+
+        # 9. Install helper scripts
+        echo "Installing helper scripts..."
+        if [ -f /usr/share/keriguard/keriguard-fix-permissions.sh ]; then
+            cp /usr/share/keriguard/keriguard-fix-permissions.sh /usr/lib/keriguard/
+            chmod 755 /usr/lib/keriguard/keriguard-fix-permissions.sh
+        fi
+
+        # 10. Install polkit rules for WireGuard service control
+        echo "Installing polkit rules..."
+        if [ -f /usr/share/polkit-1/rules.d/50-keriguard-wireguard.rules ]; then
+            echo "Polkit rules installed successfully"
+        else
+            echo "Warning: Polkit rules file not found. WireGuard service control may require root privileges."
+        fi
+
+        # 11. Reload systemd (if available)
+        if [ -d /run/systemd/system ]; then
+            echo "Reloading systemd..."
+            systemctl daemon-reload || true
+        else
+            echo "Systemd not detected, skipping daemon-reload"
+        fi
+
+        # 12. Display installation instructions
+        echo ""
+        echo "======================================================================"
+        echo "KERIGuard Installation Complete"
+        echo "======================================================================"
+        echo ""
+        echo "Two services have been installed:"
+        echo "  - keriguard-guardian.service"
+        echo "  - keriguard-sentinel.service"
+        echo ""
+        echo "BEFORE STARTING THE SERVICES:"
+        echo ""
+        echo "1. Configure the Guardian service:"
+        echo "   sudo nano /etc/default/keriguard-guardian"
+        echo "   (Update KERIGUARD_SENTINEL_AID and other settings)"
+        echo ""
+        echo "2. Configure the Sentinel service:"
+        echo "   sudo nano /etc/keriguard/sentinel.yaml"
+        echo "   (Update export_dir, base_dir, and other settings)"
+        echo ""
+        echo "3. Enable and start the services:"
+        echo "   sudo systemctl enable keriguard-sentinel"
+        echo "   sudo systemctl enable keriguard-guardian"
+        echo "   sudo systemctl start keriguard-sentinel"
+        echo "   sudo systemctl start keriguard-guardian"
+        echo ""
+        echo "4. Check service status:"
+        echo "   sudo systemctl status keriguard-guardian"
+        echo "   sudo systemctl status keriguard-sentinel"
+        echo ""
+        echo "5. View logs:"
+        echo "   tail -f /var/log/keriguard-guardian/guardian.log"
+        echo "   tail -f /var/log/keriguard-sentinel/sentinel.log"
+        echo ""
+        echo "CLI utilities are available at:"
+        echo "  - /opt/keriguard/venv/bin/kg"
+        echo "  - /opt/keriguard/venv/bin/kg-sentinel"
+        echo "======================================================================"
+        echo ""
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

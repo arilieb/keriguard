@@ -8,6 +8,7 @@ Initialize the KERIGuard server
 
 import argparse
 import asyncio
+import logging
 import random
 
 from keri import help, kering
@@ -16,11 +17,18 @@ from keri.app.keeping import Algos
 from keri.core import parsing
 from keri.kering import ConfigurationError
 from sentinel.core.initializing import SentinelConfig
+from sentinel.framework.connecting import connect_to_healthkeri
 
 from keriguard.core.initializing import (
     load_schema,
     load_oobi,
     KeriguardConfig,
+)
+from keriguard.core.systeming import (
+    enable_guardian,
+    enable_sentinel,
+    start_sentinel,
+    start_guardian,
 )
 from keriguard.core.wireguarding import SCHEMA_OOBIS, Schema
 from keriguard.db.basing import KERIGuardBaser
@@ -72,9 +80,16 @@ parser.add_argument(
     default=None,
 )
 parser.add_argument(
-    "--log-level",
-    default="INFO",
+    "--loglevel",
+    default="ERROR",
     help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+)
+parser.add_argument(
+    "--logfile",
+    action="store",
+    required=False,
+    default=None,
+    help="path of the log file. If not defined, logs will not be written to the file.",
 )
 parser.add_argument(
     "--sentinel-config-path",
@@ -83,8 +98,21 @@ parser.add_argument(
     help="Path to sentinel config file",
 )
 
+FORMAT = "%(asctime)s [keriguard] %(levelname)-8s %(message)s"
+
 
 async def up(args):
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    help.ogler.level = logging.getLevelName(args.loglevel)
+    base_formatter = logging.Formatter(FORMAT)  # basic format
+    base_formatter.default_msec_format = None
+    help.ogler.baseConsoleHandler.setFormatter(base_formatter)
+
+    if args.logfile is not None:
+        help.ogler.headDirPath = args.logfile
+        help.ogler.reopen(name="keriguard", temp=False, clear=True)
+
     config = KeriguardConfig.load(args.config)
     keriguard_name = args.name
     keriguard_alias = args.alias
@@ -103,17 +131,22 @@ async def up(args):
         name=keriguard_name, base=args.base, temp=False, **kwa
     )
     if not (keriguard_hab := keriguard_hby.habByName(keriguard_alias)):
-        raise ConfigurationError(f"KERIguard alias {keriguard_alias} not found")
-
-    if not keriguard_hab.kever.wits:
-        raise ConfigurationError(f"KERIguard alias {keriguard_alias} has no witnesses")
+        keriguard_hab = keriguard_hby.makeHab(
+            name=keriguard_alias,
+            transferable=True,
+            icount=1,
+            isith="1",
+            ncount=1,
+            nsith="1",
+            toad=0,
+        )
 
     # Create the environment and identifier for the sentinel
     sentinel_hby = habbing.Habery(name=sentinel_name, base=args.base, temp=False, **kwa)
     if not (sentinel_hab := sentinel_hby.habByName(sentinel_alias)):
         sentinel_hab = sentinel_hby.makeHab(
             name=sentinel_alias,
-            transferable=False,
+            transferable=not config.local,
             icount=1,
             isith="1",
             ncount=1,
@@ -141,56 +174,23 @@ async def up(args):
 
     keriguard_org.update(pre=sentinel_hab.pre, data=dict(alias=sentinel_alias))
 
-    print(f"\n\nKERIGuard AID: {keriguard_hab.pre}\n")
-
-    witness_aid = random.choice(keriguard_hab.kever.wits)
-    urls = keriguard_hab.fetchUrls(
-        eid=witness_aid, scheme=kering.Schemes.http
-    ) or keriguard_hab.fetchUrls(eid=witness_aid, scheme=kering.Schemes.https)
-
-    if not urls:
-        raise kering.ConfigurationError(
-            f"unable to query witness {witness_aid}, no http endpoint"
-        )
-
-    url = (
-        urls[kering.Schemes.https]
-        if kering.Schemes.https in urls
-        else urls[kering.Schemes.http]
-    )
-    keriguard_oobi = f"{url.rstrip("/")}/oobi/{keriguard_hab.pre}/witness"
-    print("\n\nKERIGuard OOBI:")
-    print(keriguard_oobi)
-    print()
+    load_oobi(hby=keriguard_hby, oobi=config.issuer.oobi, alias="issuer")
+    load_oobi(hby=sentinel_hby, oobi=config.issuer.oobi, alias="issuer")
 
     if config.local:
         # Local mode: witnesses have keriguard's events; use OOBI to load into sentinel keystore.
-        load_oobi(hby=sentinel_hby, oobi=keriguard_oobi, alias="keriguard")
-    else:
-        # SaaS mode: sentinel up never submits keriguard's events to KERI witnesses (only to
-        # hkweb MongoDB).  The sentinel keystore doesn't need keriguard's key state to verify
-        # credentials — the verifier only checks the issuer, not the recipient.
-        # Just register the OOBI URL as contact metadata so other code can reference it.
-        connecting.Organizer(hby=sentinel_hby).update(
-            pre=keriguard_hab.pre,
-            data=dict(alias=keriguard_alias, oobi=keriguard_oobi),
-        )
-
-    if config.local:
         load_oobi(hby=keriguard_hby, oobi=config.registrar.oobi, alias="registrar")
         load_oobi(
             hby=keriguard_hby,
             oobi=config.registrar.keriguard.oobi,
             alias="registrar-keriguard",
         )
-        load_oobi(hby=keriguard_hby, oobi=config.issuer.oobi, alias="issuer")
         load_oobi(hby=sentinel_hby, oobi=config.registrar.oobi, alias="registrar")
         load_oobi(
             hby=sentinel_hby,
             oobi=config.registrar.keriguard.oobi,
             alias="registrar-keriguard",
         )
-        load_oobi(hby=sentinel_hby, oobi=config.issuer.oobi, alias="issuer")
 
         if (
             config.registrar.aid not in keriguard_hby.kevers
@@ -201,9 +201,6 @@ async def up(args):
                 "Unable to resolve configuration root identifiers. Please check your configuration"
             )
     else:
-        load_oobi(hby=keriguard_hby, oobi=config.issuer.oobi, alias="issuer")
-        load_oobi(hby=sentinel_hby, oobi=config.issuer.oobi, alias="issuer")
-
         if config.issuer.aid not in keriguard_hby.kevers:
             raise ConfigurationError(
                 "Unable to resolve issuer identifier. Please check your configuration"
@@ -227,6 +224,56 @@ async def up(args):
         sentinel_config.registrar.aid = config.registrar.aid
         sentinel_config.registrar.oobi = config.registrar.oobi
         sentinel_config.registrar.url = config.registrar.url
+
+    else:
+        # Use Sentinel method with auth_key to register the server
+        await connect_to_healthkeri(
+            server_name=keriguard_name,
+            sentinel_hby=sentinel_hby,
+            sentinel_hab=sentinel_hab,
+            auth_key=config.server.auth_key,  # type: ignore
+            server_hby=keriguard_hby,
+            server_hab=keriguard_hab,
+            witness=True,
+        )
+
+    # Use OS specific service enable and start for Guardian and Sentinel
+    await enable_sentinel()
+    await enable_guardian()
+
+    await start_sentinel()
+    await start_guardian()
+
+    if not keriguard_hab.kever.wits:
+        raise ConfigurationError(f"KERIguard alias {keriguard_alias} has no witnesses")
+
+    print(f"\n\nKERIGuard AID: {keriguard_hab.pre}\n")
+
+    witness_aid = random.choice(keriguard_hab.kever.wits)
+    urls = keriguard_hab.fetchUrls(
+        eid=witness_aid, scheme=kering.Schemes.http
+    ) or keriguard_hab.fetchUrls(eid=witness_aid, scheme=kering.Schemes.https)
+
+    if not urls:
+        raise kering.ConfigurationError(
+            f"unable to query witness {witness_aid}, no http endpoint"
+        )
+
+    url = (
+        urls[kering.Schemes.https]
+        if kering.Schemes.https in urls
+        else urls[kering.Schemes.http]
+    )
+    keriguard_oobi = f"{url.rstrip("/")}/oobi/{keriguard_hab.pre}/witness"
+    print("\n\nKERIGuard OOBI:")
+    print(keriguard_oobi)
+    print()
+
+    load_oobi(hby=sentinel_hby, oobi=keriguard_oobi, alias="keriguard")
+    connecting.Organizer(hby=sentinel_hby).update(
+        pre=keriguard_hab.pre,
+        data=dict(alias=keriguard_alias, oobi=keriguard_oobi),
+    )
 
     if args.sentinel_config_path:
         sentinel_config.save(args.sentinel_config_path)

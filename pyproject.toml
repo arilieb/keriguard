@@ -25,31 +25,22 @@ authors = [
 ]
 
 dependencies = [
-    "keri~=1.3.4",
+    "keri~=1.3.5",
     "kept @git+https://git@github.com/healthKERI/kept.git@main",
+    "sentinel @git+https://git@github.com/healthKERI/sentinel@main",
     "multicommand>=1.0.0",
     'cbor>=1.0.0',
     'httpx>=0.28.1',
     "requests>=2.32.4",
     'requests_toolbelt==1.0.0',
     'cryptography>=42.0.0',
-    "dbus-fast==5.0.21"
-]
-
-[project.optional-dependencies]
-# Sentinel framework handler (event-driven Wireguard management)
-sentinel-handler = [
-    "sentinel @git+https://git@github.com/healthKERI/sentinel",
-]
-
-# Full application stack with database
-app = [
-    "keriguard[sentinel-handler]",
+    "dbus-fast==5.0.21",
     "sqlalchemy[asyncio]>=2.0.0",
     "aiosqlite>=0.20.0",
     "alembic>=1.14.0"
 ]
 
+[project.optional-dependencies]
 # Development dependencies
 dev = [
     "keriguard[app]",

@@ -1,0 +1,29 @@
+[Unit]
+Description=KERIGuard Guardian Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=keriguard
+Group=keriguard
+EnvironmentFile=/etc/default/keriguard-guardian
+WorkingDirectory=/opt/keriguard/guardian
+ExecStart=/opt/keriguard/venv/bin/kg guardian start \
+    --sentinel-aid ${KERIGUARD_SENTINEL_AID} \
+    --sentinel-export-dir ${KERIGUARD_EXPORT_DIR} \
+    --poll-interval ${KERIGUARD_POLL_INTERVAL} \
+    --config-dir ${KERIGUARD_CONFIG_DIR} \
+    --name ${KERIGUARD_NAME} \
+    --alias ${KERIGUARD_ALIAS} \
+    --base ${KERIGUARD_BASE} \
+    --loglevel ${KERIGUARD_LOGLEVEL}
+Restart=on-failure
+RestartSec=10
+
+StandardOutput=append:/var/log/keriguard-guardian/guardian.log
+StandardError=append:/var/log/keriguard-guardian/guardian.error.log
+SyslogIdentifier=keriguard-guardian
+
+[Install]
+WantedBy=multi-user.target

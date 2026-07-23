@@ -15,6 +15,7 @@ import yaml
 import requests
 from keri.app import connecting
 from keri.core import scheming
+from keri.kering import ConfigurationError
 
 # Regex pattern to extract AID/prefix from OOBI URL
 # Matches: /oobi/{cid} or /oobi/{cid}/{role} or /oobi/{cid}/{role}/{eid}
@@ -158,9 +159,9 @@ class ServerConfig:
         self._data = data
 
     @property
-    def code(self) -> str:
+    def auth_key(self) -> str:
         """Server auth code provisioned via Locksmith."""
-        return self._data.get("code", "")
+        return self._data.get("auth_key", "")
 
 
 class KeriguardConfig:
@@ -209,7 +210,11 @@ class KeriguardConfig:
         if data is None:
             data = {}
 
-        return cls(data)
+        instance = cls(data)
+        if not instance.local and (instance.server is None or instance.server.auth_key is None):  # type: ignore
+            raise ConfigurationError("Server configuration is missing or incomplete")
+
+        return instance
 
     @property
     def local(self) -> bool:

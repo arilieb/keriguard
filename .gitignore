@@ -219,3 +219,16 @@ __marimo__/
 *.cesr
 
 wireguard/
+keri/
+
+# Debian packaging
+debian/keriguard/
+debian/.debhelper/
+debian/files
+debian/*.substvars
+debian/*.debhelper.log
+debian/debhelper-build-stamp
+.pybuild/
+*.deb
+*.buildinfo
+*.changes

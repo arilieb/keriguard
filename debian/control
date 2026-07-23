@@ -1,0 +1,32 @@
+Source: keriguard
+Section: net
+Priority: optional
+Maintainer: Phil Feairheller <phil@healthKERI.com>
+Build-Depends: debhelper-compat (= 13),
+               dh-virtualenv,
+               python3.13,
+               python3.13-dev,
+               python3.13-venv,
+               build-essential,
+               git,
+               libsodium-dev,
+               libdbus-1-dev
+Standards-Version: 4.6.0
+Homepage: https://github.com/healthKERI/keriguard
+
+Package: keriguard
+Architecture: any
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+         python3.13,
+         systemd,
+         adduser,
+         wireguard-tools,
+         dbus
+Description: KERI managed Wireguard
+ KERIGuard provides KERI-based identity and access management for
+ Wireguard VPN networks. This package includes:
+ .
+  * Guardian service for managing Wireguard configuration
+  * Sentinel service for monitoring KERI events
+  * kg and kg-sentinel CLI utilities
