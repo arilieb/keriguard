@@ -6,6 +6,7 @@ Wireguard configuration management with KERI integration.
 """
 
 import pysodium
+import shutil
 from keri import help
 from keri.core.signing import Signer
 from dataclasses import dataclass, field
@@ -53,6 +54,15 @@ class KeyGenerationError(WireguardError):
 
 class PeerAIDMissingError(WireguardError):
     """Exception raised when peer AID is missing in configuration."""
+
+    pass
+
+
+class PeerResolutionPendingError(WireguardError):
+    """Raised when peer AID resolution has been queued but is not yet complete.
+
+    The caller should treat this as a transient failure and retry later.
+    """
 
     pass
 
@@ -1126,9 +1136,12 @@ class WireguardConfigManager:
         if backup and path.exists():
             backup_path = path.with_suffix(path.suffix + ".bak")
             logger.info(f"Creating backup at {backup_path}")
-            import shutil
-
-            shutil.copy2(path, backup_path)
+            try:
+                shutil.copy2(path, backup_path)
+            except PermissionError:
+                logger.warning(
+                    f"Cannot create backup at {backup_path}: permission denied"
+                )
 
         # Write configuration
         WireguardConfigWriter.write_file(config, path)

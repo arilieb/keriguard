@@ -42,6 +42,15 @@ def load_oobi(hby, oobi: str, alias: str):
 
     aid = match.group("cid")
 
+    # If the AID is already in the local key-event database, skip the network
+    # call.  The vault may have resolved this OOBI in a previous session while
+    # the witness has since been restarted with empty state (e.g. after a
+    # clean-slate wipe of /usr/local/var/keri/).  The locally cached key state
+    # is authoritative; the sentinel will refresh it via witness queries later.
+    if aid in hby.kevers:
+        org.update(pre=aid, data=dict(alias=alias, oobi=oobi))
+        return aid
+
     response = requests.get(oobi)
     response.raise_for_status()
 
