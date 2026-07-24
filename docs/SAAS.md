@@ -57,7 +57,7 @@ Guardian (keriguard) → WireGuard config (no registrar peer)
 ### keriguard
 | File | Purpose |
 |------|---------|
-| `/Users/arilieb/healthkeri/keriguard/src/keriguard/core/initializing.py` | `KeriguardConfig`, `RegistrarConfig`, `IssuerConfig` — config loading |
+| `/Users/arilieb/healthkeri/keriguard/src/keriguard/core/initializing.py` | `InitializationConfig`, `RegistrarConfig`, `IssuerConfig` — config loading |
 | `/Users/arilieb/healthkeri/keriguard/src/keriguard/app/cli/commands/guardian/up.py` | `guardian up` command — creates sentinel, loads OOBIs, writes configs |
 | `/Users/arilieb/healthkeri/keriguard/src/keriguard/app/cli/commands/guardian/connect.py` | Processes interface credential file, sets up watchers |
 | `/Users/arilieb/healthkeri/keriguard/src/keriguard/app/sentinel/services/cred_service.py` | `CredService` — processes credentials into WireGuard config files |
@@ -181,7 +181,7 @@ async def upload_issued_credential(app, credential_said, schema, issuer, recipie
 
 ### Phase 1: SaaS Config in keriguard.yaml + KeriguardConfig
 
-**What**: Add a `local` top-level flag and optional `server` section to `keriguard.yaml`. Update `KeriguardConfig` to parse these. The `registrar` section becomes optional when `local: false`.
+**What**: Add a `local` top-level flag and optional `server` section to `keriguard.yaml`. Update `InitializationConfig` to parse these. The `registrar` section becomes optional when `local: false`.
 
 **Files to modify**:
 - `keriguard/src/keriguard/core/initializing.py`
@@ -202,7 +202,7 @@ issuer:
 **Changes to `initializing.py`**:
 
 1. Add `ServerConfig` class with `.code` property.
-2. Add `local` property to `KeriguardConfig` (defaults `True` for backwards compat).
+2. Add `local` property to `InitializationConfig` (defaults `True` for backwards compat).
 3. Add `server` property returning optional `ServerConfig`.
 4. Make `KeriguardConfig.registrar` tolerant of missing `registrar` key — return empty `RegistrarConfig` instead of raising.
 
@@ -922,7 +922,7 @@ No changes needed — `setup_hk()` in sentineling.py already calls `HealthKERICo
 
 | Repo | File                                       | Change |
 |------|--------------------------------------------|--------|
-| keriguard | `core/initializing.py`                     | Add `local`, `server`/`ServerConfig` to `KeriguardConfig` |
+| keriguard | `core/initializing.py`                     | Add `local`, `server`/`ServerConfig` to `InitializationConfig` |
 | keriguard | `app/cli/commands/guardian/up.py`          | Branch on `config.local` for registrar OOBI load + sentinel config |
 | sentinel | `core/credentialing.py`                    | Add `SaaSCredentialLoader` class |
 | sentinel | `core/watching.py`                         | `WatchedAdjudicationPoller`: accept `saas_loader` param |

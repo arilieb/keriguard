@@ -1,0 +1,11 @@
+# Production KERIGuard Guardian Configuration
+# Example configuration for production deployment
+
+sentinel:
+  aid: "EBraKLI-FshC4NeiDnJZMmypYaHAb7kbzlL6tEIT0Cip"
+  export_dir: "/var/lib/sentinel/export"
+  poll_interval: 2.0
+
+logging:
+  level: "INFO"
+  file: "/var/log/keriguard-guardian/guardian.log"

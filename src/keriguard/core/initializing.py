@@ -6,6 +6,7 @@ Methods for initializing a KERIGuard instance
 
 """
 
+import os
 import re
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -13,6 +14,7 @@ from urllib.parse import urlparse
 
 import yaml
 import requests
+from keri import help
 from keri.app import connecting
 from keri.core import scheming
 from keri.kering import ConfigurationError
@@ -23,46 +25,128 @@ OOBI_RE = re.compile(
     r"\A/oobi/(?P<cid>[^/]+)(?:/(?P<role>[^/]+)(?:/(?P<eid>[^/]+))?)?\Z", re.IGNORECASE
 )
 
-
-def load_schema(hby, schema_oobi: str, schema_said: str):
-    response = requests.get(schema_oobi)
-    schemer = scheming.Schemer(raw=bytearray(response.content))
-    if schemer.said == schema_said:
-        hby.db.schema.pin(keys=(schemer.said,), val=schemer)
-        return True
-
-    return False
+logger = help.ogler.getLogger()
 
 
-def load_oobi(hby, oobi: str, alias: str):
-    org = connecting.Organizer(hby=hby)
-    purl = urlparse(oobi)
-    match = OOBI_RE.match(purl.path)
-    if not match:
-        raise ValueError(f"Invalid OOBI URL {oobi}")
+class KERIGuardConfig:
+    """
+    Configuration loader and accessor for KERIGuard guardian start command.
 
-    aid = match.group("cid")
+    This class reads a YAML configuration file and provides typed access
+    to all configuration values needed for running the guardian service.
 
-    # If the AID is already in the local key-event database, skip the network
-    # call.  The vault may have resolved this OOBI in a previous session while
-    # the witness has since been restarted with empty state (e.g. after a
-    # clean-slate wipe of /usr/local/var/keri/).  The locally cached key state
-    # is authoritative; the sentinel will refresh it via witness queries later.
-    if aid in hby.kevers:
-        org.update(pre=aid, data=dict(alias=alias, oobi=oobi))
-        return aid
+    Example YAML structure:
+        sentinel:
+          aid: "EBraKLI-FshC4NeiDnJZMmypYaHAb7kbzlL6tEIT0Cip"
+          export_dir: "/var/lib/sentinel/export"
+          poll_interval: 2.0
 
-    response = requests.get(oobi)
-    response.raise_for_status()
+        wireguard:
+          config_dir: "/etc/wireguard"
 
-    hby.psr.parse(ims=response.content)
-    if aid not in hby.kevers:
-        raise ValueError(f"Invalid OOBI URL {oobi} for {aid}")
+        keri:
+          name: "keriguard"
+          alias: "keriguard-sentinel"
+          base: ""
+          passcode: null
 
-    hby.kvy.processEscrows()
-    org.update(pre=aid, data=dict(alias=alias, oobi=oobi))
+        logging:
+          level: "INFO"
+          file: "/var/log/keriguard/guardian.log"
 
-    return aid
+    Example:
+        config = KERIGuardConfig.load("/etc/keriguard/guardian.yaml")
+        print(config.sentinel_aid)
+        print(config.poll_interval)
+    """
+
+    def __init__(self, data: Dict[str, Any]):
+        self._data = data
+        self._sentinel = data.get("sentinel", {})
+        self._wireguard = data.get("wireguard", {})
+        self._keri = data.get("keri", {})
+        self._logging = data.get("logging", {})
+
+    @classmethod
+    def load(cls, config_path: str) -> "KERIGuardConfig":
+        """
+        Load configuration from a YAML file.
+
+        Args:
+            config_path: Path to the YAML configuration file
+
+        Returns:
+            KERIGuardConfig instance with loaded configuration
+
+        Raises:
+            FileNotFoundError: If the configuration file doesn't exist
+            yaml.YAMLError: If the YAML is malformed
+        """
+        path = Path(config_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+        with open(path, "r") as f:
+            data = yaml.safe_load(f)
+
+        if data is None:
+            data = {}
+
+        return cls(data)
+
+    # Sentinel properties
+    @property
+    def sentinel_aid(self) -> Optional[str]:
+        """The AID of the Sentinel to monitor."""
+        return self._sentinel.get("aid")
+
+    @property
+    def sentinel_export_dir(self) -> Optional[str]:
+        """Directory to monitor for KERI events."""
+        return self._sentinel.get("export_dir")
+
+    @property
+    def poll_interval(self) -> float:
+        """Polling interval in seconds (default: 2.0)."""
+        return self._sentinel.get("poll_interval", 2.0)
+
+    # WireGuard properties
+    @property
+    def config_dir(self) -> str:
+        """WireGuard config directory (default: /etc/wireguard)."""
+        return self._wireguard.get("config_dir", "/etc/wireguard")
+
+    # KERI properties
+    @property
+    def name(self) -> str:
+        """KERI keystore name (default: keriguard)."""
+        return self._keri.get("name", "keriguard")
+
+    @property
+    def alias(self) -> str:
+        """KERI identifier alias (default: keriguard-sentinel)."""
+        return self._keri.get("alias", "keriguard-sentinel")
+
+    @property
+    def base(self) -> str:
+        """KERI keystore base directory (default: empty string)."""
+        return self._keri.get("base", "")
+
+    @property
+    def passcode(self) -> Optional[str]:
+        """21-character encryption passcode for KERI keystore."""
+        return self._keri.get("passcode")
+
+    # Logging properties
+    @property
+    def loglevel(self) -> str:
+        """Log level (default: INFO)."""
+        return self._logging.get("level", "INFO")
+
+    @property
+    def logfile(self) -> Optional[str]:
+        """Path to the log file."""
+        return self._logging.get("file")
 
 
 class RegistrarKeriguardConfig:
@@ -164,7 +248,7 @@ class ServerConfig:
         return self._data.get("auth_key", "")
 
 
-class KeriguardConfig:
+class InitializationConfig:
     """
     Configuration loader and accessor for KERIGuard initialization.
 
@@ -186,7 +270,7 @@ class KeriguardConfig:
         self._server = ServerConfig(server_data) if server_data else None
 
     @classmethod
-    def load(cls, config_path: str) -> "KeriguardConfig":
+    def load(cls, config_path: str) -> "InitializationConfig":
         """
         Load configuration from a YAML file.
 
@@ -235,3 +319,125 @@ class KeriguardConfig:
     def issuer(self) -> IssuerConfig:
         """The issuer configuration."""
         return self._issuer
+
+
+def load_schema(hby, schema_oobi: str, schema_said: str):
+    response = requests.get(schema_oobi)
+    schemer = scheming.Schemer(raw=bytearray(response.content))
+    if schemer.said == schema_said:
+        hby.db.schema.pin(keys=(schemer.said,), val=schemer)
+        return True
+
+    return False
+
+
+def load_oobi(hby, oobi: str, alias: str):
+    org = connecting.Organizer(hby=hby)
+    purl = urlparse(oobi)
+    match = OOBI_RE.match(purl.path)
+    if not match:
+        raise ValueError(f"Invalid OOBI URL {oobi}")
+
+    aid = match.group("cid")
+
+    # If the AID is already in the local key-event database, skip the network
+    # call.  The vault may have resolved this OOBI in a previous session while
+    # the witness has since been restarted with empty state (e.g. after a
+    # clean-slate wipe of /usr/local/var/keri/).  The locally cached key state
+    # is authoritative; the sentinel will refresh it via witness queries later.
+    if aid in hby.kevers:
+        org.update(pre=aid, data=dict(alias=alias, oobi=oobi))
+        return aid
+
+    response = requests.get(oobi)
+    response.raise_for_status()
+
+    hby.psr.parse(ims=response.content)
+    if aid not in hby.kevers:
+        raise ValueError(f"Invalid OOBI URL {oobi} for {aid}")
+
+    hby.kvy.processEscrows()
+    org.update(pre=aid, data=dict(alias=alias, oobi=oobi))
+
+    return aid
+
+
+def generate_guardian_config(
+    sentinel_aid: str,
+    sentinel_export_dir: str,
+    poll_interval: float = 2.0,
+    config_dir: str = "/etc/wireguard",
+    name: str = "keriguard",
+    alias: str = "keriguard-sentinel",
+    base: str = "",
+    passcode: Optional[str] = None,
+    loglevel: str = "INFO",
+    logfile: Optional[str] = None,
+) -> dict:
+    """
+    Generate a guardian configuration dictionary.
+
+    Args:
+        sentinel_aid: AID of the Sentinel to monitor
+        sentinel_export_dir: Directory to monitor for KERI events
+        poll_interval: Polling interval in seconds
+        config_dir: WireGuard config directory
+        name: KERI keystore name
+        alias: KERI identifier alias
+        base: KERI keystore base directory
+        passcode: 21-character encryption passcode
+        loglevel: Log level
+        logfile: Path to log file
+
+    Returns:
+        dict: Guardian configuration structure
+    """
+    config = {
+        "sentinel": {
+            "aid": sentinel_aid,
+            "export_dir": sentinel_export_dir,
+            "poll_interval": poll_interval,
+        },
+        "wireguard": {
+            "config_dir": config_dir,
+        },
+        "keri": {
+            "name": name,
+            "alias": alias,
+            "base": base,
+        },
+        "logging": {
+            "level": loglevel,
+        },
+    }
+
+    # Only include optional values if they're set
+    if passcode:
+        config["keri"]["passcode"] = passcode
+
+    if logfile:
+        config["logging"]["file"] = logfile
+
+    return config
+
+
+def save_guardian_config(config: dict, path: str) -> None:
+    """
+    Save guardian configuration to a YAML file.
+
+    Args:
+        config: Guardian configuration dictionary
+        path: Path to save the configuration file
+    """
+    # Ensure the parent directory exists
+    config_path = Path(path)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save the configuration
+    with open(config_path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+    # Set appropriate permissions (readable by owner and group)
+    os.chmod(config_path, 0o640)
+
+    logger.info(f"Guardian configuration saved to {path}")

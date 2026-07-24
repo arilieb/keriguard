@@ -42,6 +42,8 @@ case "$1" in
         chown -R keriguard:keriguard /var/log/keriguard-sentinel
         chown -R keriguard:keriguard /var/lib/keriguard-guardian
         chown -R keriguard:keriguard /var/lib/keriguard-sentinel
+        chown -R root:keriguard /etc/wireguard
+        chmod 770 /etc/wireguard
 
         # 5. Install logrotate configurations
         echo "Installing logrotate configurations..."
@@ -88,28 +90,8 @@ EOF
             cat > /etc/default/keriguard-guardian <<'EOF'
 # KERIGuard Guardian Service Configuration
 # IMPORTANT: Update these values before starting the service
-
-# Sentinel AID (REQUIRED - obtain from sentinel service)
-KERIGUARD_SENTINEL_AID=CHANGE_ME
-
-# Directory where sentinel exports KERI events
-KERIGUARD_EXPORT_DIR=/var/lib/sentinel/export
-
-# Polling interval in seconds
-KERIGUARD_POLL_INTERVAL=2.0
-
-# Wireguard configuration directory
-KERIGUARD_CONFIG_DIR=/etc/wireguard
-
-# Service name and alias
-KERIGUARD_NAME=keriguard
-KERIGUARD_ALIAS=keriguard-guardian
-
-# KERI base directory for this guardian
-KERIGUARD_BASE=/var/lib/keriguard-guardian/keri
-
-# Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-KERIGUARD_LOGLEVEL=INFO
+KERIGUARD_CONFIG=/etc/keriguard/keriguard.yaml
+ARCHIMEDES_ENVIRONMENT=development
 EOF
             chown root:keriguard /etc/default/keriguard-guardian
             chmod 640 /etc/default/keriguard-guardian
@@ -157,20 +139,41 @@ EOF
         mkdir -p /var/lib/sentinel/export
         chmod 755 /var/lib/sentinel/export
 
-        # 8. Create shared KERI directory
+        # 8. Create keriguard configuration template if it doesn't exist
+        echo "Creating keriguard configuration template..."
+        if [ ! -f /etc/keriguard/keriguard.yaml ]; then
+            cat > /etc/keriguard/keriguard.yaml <<'EOF'
+sentinel:
+  aid: CHANGE_ME_BEFORE_STARTING_SERVICE
+  export_dir: /opt/keriguard/sentinel/keriguard
+  poll_interval: 2.0
+wireguard:
+  config_dir: /etc/wireguard
+keri:
+  name: keriguard
+  alias: keriguard
+  base: ''
+logging:
+  level: INFO
+EOF
+            chown root:keriguard /etc/keriguard/keriguard.yaml
+            chmod 640 /etc/keriguard/keriguard.yaml
+        fi
+
+        # 9. Create shared KERI directory
         echo "Creating shared KERI directory..."
         mkdir -p /usr/local/var/keri
         chown keriguard:keriguard /usr/local/var/keri
         chmod 2770 /usr/local/var/keri
 
-        # 9. Install helper scripts
+        # 10. Install helper scripts
         echo "Installing helper scripts..."
         if [ -f /usr/share/keriguard/keriguard-fix-permissions.sh ]; then
             cp /usr/share/keriguard/keriguard-fix-permissions.sh /usr/lib/keriguard/
             chmod 755 /usr/lib/keriguard/keriguard-fix-permissions.sh
         fi
 
-        # 10. Install polkit rules for WireGuard service control
+        # 11. Install polkit rules for WireGuard service control
         echo "Installing polkit rules..."
         if [ -f /usr/share/polkit-1/rules.d/50-keriguard-wireguard.rules ]; then
             echo "Polkit rules installed successfully"
@@ -178,7 +181,7 @@ EOF
             echo "Warning: Polkit rules file not found. WireGuard service control may require root privileges."
         fi
 
-        # 11. Reload systemd (if available)
+        # 12. Reload systemd (if available)
         if [ -d /run/systemd/system ]; then
             echo "Reloading systemd..."
             systemctl daemon-reload || true
@@ -186,7 +189,7 @@ EOF
             echo "Systemd not detected, skipping daemon-reload"
         fi
 
-        # 12. Display installation instructions
+        # 13. Display installation instructions
         echo ""
         echo "======================================================================"
         echo "KERIGuard Installation Complete"

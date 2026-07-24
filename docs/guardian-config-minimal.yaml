@@ -1,0 +1,6 @@
+# Minimal KERIGuard Guardian Configuration
+# Only required parameters are specified
+
+sentinel:
+  aid: "EBraKLI-FshC4NeiDnJZMmypYaHAb7kbzlL6tEIT0Cip"
+  export_dir: "/var/lib/sentinel/export"

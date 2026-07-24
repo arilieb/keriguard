@@ -18,17 +18,21 @@ from keri.core import parsing
 from keri.kering import ConfigurationError
 from sentinel.core.initializing import SentinelConfig
 from sentinel.framework.connecting import connect_to_healthkeri
+from sentinel.framework.watching import LocalWatcherConnector
 
 from keriguard.core.initializing import (
     load_schema,
     load_oobi,
-    KeriguardConfig,
+    InitializationConfig,
+    generate_guardian_config,
+    save_guardian_config,
 )
 from keriguard.core.systeming import (
     enable_guardian,
     enable_sentinel,
     start_sentinel,
     start_guardian,
+    is_sentinel_up,
 )
 from keriguard.core.wireguarding import SCHEMA_OOBIS, Schema
 from keriguard.db.basing import KERIGuardBaser
@@ -97,6 +101,12 @@ parser.add_argument(
     required=False,
     help="Path to sentinel config file",
 )
+parser.add_argument(
+    "--keriguard-config-path",
+    default=None,
+    required=False,
+    help="Path to guardian config file (default: /etc/keriguard/keriguard.yaml)",
+)
 
 FORMAT = "%(asctime)s [keriguard] %(levelname)-8s %(message)s"
 
@@ -113,7 +123,7 @@ async def up(args):
         help.ogler.headDirPath = args.logfile
         help.ogler.reopen(name="keriguard", temp=False, clear=True)
 
-    config = KeriguardConfig.load(args.config)
+    config = InitializationConfig.load(args.config)
     keriguard_name = args.name
     keriguard_alias = args.alias
 
@@ -206,6 +216,7 @@ async def up(args):
                 "Unable to resolve issuer identifier. Please check your configuration"
             )
 
+    # Generate sentinel config
     sentinel_config = SentinelConfig()
     sentinel_config.name = sentinel_name
     sentinel_config.alias = sentinel_alias
@@ -215,7 +226,7 @@ async def up(args):
     sentinel_config.base = args.base
     sentinel_config.uxd = True
     sentinel_config.local = config.local
-    sentinel_config.export_dir = f"/usr/local/var/sentinel/{args.name}"
+    sentinel_config.export_dir = "/var/lib/keriguard-sentinel"
 
     sentinel_config.issuer.aid = config.issuer.aid
     sentinel_config.issuer.oobi = config.issuer.oobi
@@ -236,13 +247,6 @@ async def up(args):
             server_hab=keriguard_hab,
             witness=True,
         )
-
-    # Use OS specific service enable and start for Guardian and Sentinel
-    await enable_sentinel()
-    await enable_guardian()
-
-    await start_sentinel()
-    await start_guardian()
 
     if not keriguard_hab.kever.wits:
         raise ConfigurationError(f"KERIguard alias {keriguard_alias} has no witnesses")
@@ -280,6 +284,25 @@ async def up(args):
     else:
         sentinel_config.save(f"/etc/sentinel/{args.name}.yaml")
 
+    # Generate and save guardian configuration
+    guardian_config = generate_guardian_config(
+        sentinel_aid=sentinel_hab.pre,
+        sentinel_export_dir=sentinel_config.export_dir,
+        poll_interval=2.0,
+        config_dir="/etc/wireguard",
+        name=keriguard_name,
+        alias=keriguard_alias,
+        base=args.base,
+        passcode=args.bran,
+        loglevel="INFO",  # Default to INFO for guardian (up command uses ERROR)
+        logfile=None,  # Can be set later if needed
+    )
+
+    if args.keriguard_config_path:
+        save_guardian_config(guardian_config, args.keriguard_config_path)
+    else:
+        save_guardian_config(guardian_config, "/etc/keriguard/keriguard.yaml")
+
     kgb = KERIGuardBaser(name=args.name, base=args.base)
 
     if config.local:
@@ -294,3 +317,33 @@ async def up(args):
         )
 
     kgb.set_issuer(aid=config.issuer.aid, oobi=config.issuer.oobi)
+
+    # Use OS specific service enable and start for Guardian and Sentinel
+    await enable_sentinel()
+    await enable_guardian()
+
+    await start_sentinel()
+    await start_guardian()
+
+    while not await is_sentinel_up():
+        await asyncio.sleep(1)
+
+    print("Waiting for Sentinel to start...")
+    await asyncio.sleep(3)
+
+    watcher_connector = LocalWatcherConnector(
+        keriguard_hby, keriguard_hab, sentinel_hab.pre
+    )
+
+    retries = 0
+    while retries < 5:
+        try:
+            watcher_connector.watch(config.issuer.aid, config.issuer.oobi)
+            watcher_connector.watch(keriguard_hab.pre, None)
+            break
+        except ConnectionError:
+            print("Retrying sentinel connection...")
+            await asyncio.sleep(3)
+            retries += 1
+
+    print("KERIGuard set up complete.")

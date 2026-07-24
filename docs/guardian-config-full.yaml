@@ -1,0 +1,36 @@
+# Full KERIGuard Guardian Configuration
+# All available parameters with their default values
+
+sentinel:
+  # Required: AID of the Sentinel to monitor
+  aid: "EBraKLI-FshC4NeiDnJZMmypYaHAb7kbzlL6tEIT0Cip"
+
+  # Required: Directory to monitor for KERI events (contains kel/, tel/, cred/ subdirs)
+  export_dir: "/var/lib/sentinel/export"
+
+  # Optional: Polling interval in seconds (default: 2.0)
+  poll_interval: 2.0
+
+wireguard:
+  # Optional: Directory for WireGuard config files (default: /etc/wireguard)
+  config_dir: "/etc/wireguard"
+
+keri:
+  # Optional: KERI keystore name (default: keriguard)
+  name: "keriguard"
+
+  # Optional: KERI identifier alias (default: keriguard-sentinel)
+  alias: "keriguard-sentinel"
+
+  # Optional: KERI keystore base directory (default: empty string)
+  base: "/var/lib/keriguard/keri"
+
+  # Optional: 21-character encryption passcode for KERI keystore (default: null)
+  passcode: "0123456789abcdefghijk"
+
+logging:
+  # Optional: Log level - DEBUG | INFO | WARNING | ERROR | CRITICAL (default: INFO)
+  level: "DEBUG"
+
+  # Optional: Path to log file (default: null, logs to console only)
+  file: "/var/log/keriguard/guardian.log"

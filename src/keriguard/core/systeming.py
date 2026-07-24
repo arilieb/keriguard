@@ -129,10 +129,16 @@ async def call_systemd_unit(action: WireGuardAction, unit: str) -> object:
             raise ValueError(f"Unsupported WireGuard action: {action}")
 
 
-async def _systemd_unit_active(interface: str) -> bool:
+async def _systemd_interface_active(interface: str) -> bool:
     """Return True if the wg-quick systemd unit for `interface` is active."""
     unit = wg_quick_unit(interface)
+    return await _systemd_unit_active(unit)
 
+
+async def _systemd_unit_active(unit: str) -> bool:
+    """Return True if the wg-quick systemd unit for `interface` is active."""
+
+    "/"
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
     introspection = await bus.introspect(SYSTEMD_SERVICE, SYSTEMD_OBJECT)
     proxy = bus.get_proxy_object(SYSTEMD_SERVICE, SYSTEMD_OBJECT, introspection)
@@ -286,7 +292,7 @@ async def is_wireguard_up(interface: str) -> bool:
     since callers use this for status display, not control flow.
     """
     if supports_dbus_systemd():
-        return await _systemd_unit_active(interface)
+        return await _systemd_interface_active(interface)
 
     if platform.system() == "Darwin":
         try:
@@ -339,6 +345,28 @@ async def disable_wireguard(interface: str, config_path: str | None = None) -> o
 GUARDIAN_UNIT = "keriguard-guardian.service"
 
 
+async def is_guardian_up() -> bool:
+    """Return True if the keriguard-guardian service is currently up.
+
+    Linux queries the systemd unit's ActiveState over D-Bus. macOS
+    asks KERIGuard Helper via the same IPC channel `control_wireguard` uses —
+    an unreachable/unapproved helper is treated as down rather than raised,
+    since callers use this for status display, not control flow.
+    """
+    if supports_dbus_systemd():
+        return await _systemd_unit_active(GUARDIAN_UNIT)
+
+    if platform.system() == "Darwin":
+        # TODO: is this right?
+        try:
+            response = await _send_helper_request("status", GUARDIAN_UNIT)
+        except WireGuardControlError:
+            return False
+        return response.get("state") == "up"
+
+    return False
+
+
 async def start_guardian() -> object:
     """Start the keriguard-guardian systemd service."""
     return await call_systemd_unit(WireGuardAction.START, GUARDIAN_UNIT)
@@ -376,6 +404,28 @@ async def disable_guardian() -> object:
 
 # KERIGuard Sentinel service control
 SENTINEL_UNIT = "keriguard-sentinel.service"
+
+
+async def is_sentinel_up() -> bool:
+    """Return True if the keriguard-guardian service is currently up.
+
+    Linux queries the systemd unit's ActiveState over D-Bus. macOS
+    asks KERIGuard Helper via the same IPC channel `control_wireguard` uses —
+    an unreachable/unapproved helper is treated as down rather than raised,
+    since callers use this for status display, not control flow.
+    """
+    if supports_dbus_systemd():
+        return await _systemd_unit_active(SENTINEL_UNIT)
+
+    if platform.system() == "Darwin":
+        # TODO: is this right?
+        try:
+            response = await _send_helper_request("status", SENTINEL_UNIT)
+        except WireGuardControlError:
+            return False
+        return response.get("state") == "up"
+
+    return False
 
 
 async def start_sentinel() -> object:

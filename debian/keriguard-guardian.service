@@ -9,15 +9,7 @@ User=keriguard
 Group=keriguard
 EnvironmentFile=/etc/default/keriguard-guardian
 WorkingDirectory=/opt/keriguard/guardian
-ExecStart=/opt/keriguard/venv/bin/kg guardian start \
-    --sentinel-aid ${KERIGUARD_SENTINEL_AID} \
-    --sentinel-export-dir ${KERIGUARD_EXPORT_DIR} \
-    --poll-interval ${KERIGUARD_POLL_INTERVAL} \
-    --config-dir ${KERIGUARD_CONFIG_DIR} \
-    --name ${KERIGUARD_NAME} \
-    --alias ${KERIGUARD_ALIAS} \
-    --base ${KERIGUARD_BASE} \
-    --loglevel ${KERIGUARD_LOGLEVEL}
+ExecStart=/opt/keriguard/venv/bin/kg guardian start -c ${KERIGUARD_CONFIG}
 Restart=on-failure
 RestartSec=10
 

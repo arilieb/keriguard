@@ -18,7 +18,7 @@ from keriguard.core.systeming import (
     call_wireguard_systemd,
     WireGuardNotApprovedError,
     _send_helper_request,
-    _systemd_unit_active,
+    _systemd_interface_active,
     control_wireguard,
     disable_wireguard,
     enable_wireguard,
@@ -930,7 +930,7 @@ class TestSystemdUnitActive:
             mock_message_bus_instance.connect = AsyncMock(return_value=mock_bus)
             mock_message_bus_class.return_value = mock_message_bus_instance
 
-            result = await _systemd_unit_active("wg0")
+            result = await _systemd_interface_active("wg0")
 
         assert result is True
         mock_manager.call_load_unit.assert_called_once_with("wg-quick@wg0.service")
@@ -966,7 +966,7 @@ class TestSystemdUnitActive:
             mock_message_bus_instance.connect = AsyncMock(return_value=mock_bus)
             mock_message_bus_class.return_value = mock_message_bus_instance
 
-            result = await _systemd_unit_active("wg0")
+            result = await _systemd_interface_active("wg0")
 
         assert result is False
 
@@ -992,7 +992,7 @@ class TestSystemdUnitActive:
             mock_message_bus_instance.connect = AsyncMock(return_value=mock_bus)
             mock_message_bus_class.return_value = mock_message_bus_instance
 
-            result = await _systemd_unit_active("wg0")
+            result = await _systemd_interface_active("wg0")
 
         assert result is False
 
@@ -1002,7 +1002,7 @@ class TestIsWireguardUp:
 
     @pytest.mark.asyncio
     @patch("keriguard.core.systeming.supports_dbus_systemd")
-    @patch("keriguard.core.systeming._systemd_unit_active")
+    @patch("keriguard.core.systeming._systemd_interface_active")
     async def test_is_wireguard_up_linux(self, mock_active, mock_supports):
         mock_supports.return_value = True
         mock_active.return_value = True
