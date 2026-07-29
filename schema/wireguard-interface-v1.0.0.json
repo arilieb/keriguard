@@ -1,5 +1,5 @@
 {
-  "$id": "ECRYEV1yPd4vnYNMqFSbTzvoxfz9iFlRMRTquU2uCAbY",
+  "$id": "EJhuwoliTRahBQTHyfvIROkMh6_goGAqduSsNvSD-Wco",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Wireguard Interface Credential Schema v1.0.0",
   "description": "ACDC credential schema for Wireguard VPN interface configuration. Defines a host's Wireguard interface settings including address, port, DNS, and metadata. This credential is issued to a specific host AID and contains self-contained interface configuration without peer information.",
@@ -40,124 +40,132 @@
       "type": "string"
     },
     "a": {
-      "description": "Attributes block containing interface configuration",
-      "type": "object",
-      "required": [
-        "d",
-        "u",
-        "i",
-        "dt",
-        "interface",
-        "interfaceMetadata"
-      ],
-      "properties": {
-        "d": {
-          "description": "Attributes block SAID",
+      "oneOf": [
+        {
+          "description": "Edges block SAID",
           "type": "string"
         },
-        "u": {
-          "description": "Attributes block UUID nonce",
-          "type": "string"
-        },
-        "i": {
-          "description": "Issuee AID - the host that this interface belongs to",
-          "type": "string"
-        },
-        "dt": {
-          "description": "Issuance datetime in ISO 8601 format",
-          "type": "string",
-          "format": "date-time"
-        },
-        "interface": {
-          "description": "Wireguard interface configuration for this host",
+        {
+          "description": "Attributes block containing interface configuration",
           "type": "object",
           "required": [
-            "listenPort"
+            "d",
+            "u",
+            "i",
+            "dt",
+            "interface",
+            "interfaceMetadata"
           ],
           "properties": {
-            "address": {
-              "description": "VPN IP addresses in CIDR notation (e.g., 10.0.0.1/24)",
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$|^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}/[0-9]{1,3}$"
-              },
-              "minItems": 1
+            "d": {
+              "description": "Attributes block SAID",
+              "type": "string"
             },
-            "listenPort": {
-              "description": "UDP port for Wireguard to listen on",
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 65535
+            "u": {
+              "description": "Attributes block UUID nonce",
+              "type": "string"
             },
-            "dns": {
-              "description": "DNS server addresses (IPv4 or IPv6)",
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}$|^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$"
+            "i": {
+              "description": "Issuee AID - the host that this interface belongs to",
+              "type": "string"
+            },
+            "dt": {
+              "description": "Issuance datetime in ISO 8601 format",
+              "type": "string",
+              "format": "date-time"
+            },
+            "interface": {
+              "description": "Wireguard interface configuration for this host",
+              "type": "object",
+              "required": [
+                "listenPort"
+              ],
+              "properties": {
+                "address": {
+                  "description": "VPN IP addresses in CIDR notation (e.g., 10.0.0.1/24)",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$|^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}/[0-9]{1,3}$"
+                  },
+                  "minItems": 1
+                },
+                "listenPort": {
+                  "description": "UDP port for Wireguard to listen on",
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "dns": {
+                  "description": "DNS server addresses (IPv4 or IPv6)",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}$|^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$"
+                  }
+                },
+                "mtu": {
+                  "description": "Maximum Transmission Unit (typically 1420 for Wireguard)",
+                  "type": "integer",
+                  "minimum": 576,
+                  "maximum": 65535
+                },
+                "table": {
+                  "description": "Routing table identifier (e.g., 'auto', 'off', or table number)",
+                  "type": "string"
+                },
+                "preUp": {
+                  "description": "Commands to execute before interface is brought up",
+                  "type": "string"
+                },
+                "preDown": {
+                  "description": "Commands to execute before interface is brought down",
+                  "type": "string"
+                },
+                "postUp": {
+                  "description": "Commands to execute after interface is brought up",
+                  "type": "string"
+                },
+                "postDown": {
+                  "description": "Commands to execute after interface is brought down",
+                  "type": "string"
+                }
               }
             },
-            "mtu": {
-              "description": "Maximum Transmission Unit (typically 1420 for Wireguard)",
-              "type": "integer",
-              "minimum": 576,
-              "maximum": 65535
-            },
-            "table": {
-              "description": "Routing table identifier (e.g., 'auto', 'off', or table number)",
-              "type": "string"
-            },
-            "preUp": {
-              "description": "Commands to execute before interface is brought up",
-              "type": "string"
-            },
-            "preDown": {
-              "description": "Commands to execute before interface is brought down",
-              "type": "string"
-            },
-            "postUp": {
-              "description": "Commands to execute after interface is brought up",
-              "type": "string"
-            },
-            "postDown": {
-              "description": "Commands to execute after interface is brought down",
-              "type": "string"
-            }
-          }
-        },
-        "interfaceMetadata": {
-          "description": "Metadata describing the interface purpose and deployment",
-          "type": "object",
-          "required": [
-            "interfaceName"
-          ],
-          "properties": {
-            "interfaceName": {
-              "description": "Human-readable interface name (used for config filename)",
-              "type": "string",
-              "pattern": "^[a-zA-Z0-9_-]+$",
-              "minLength": 1,
-              "maxLength": 64
-            },
-            "interfaceDescription": {
-              "description": "Purpose or description of this interface",
-              "type": "string",
-              "maxLength": 256
-            },
-            "environment": {
-              "description": "Deployment environment tag (e.g., production, staging, development)",
-              "type": "string",
-              "enum": [
-                "production",
-                "staging",
-                "development",
-                "test"
-              ]
+            "interfaceMetadata": {
+              "description": "Metadata describing the interface purpose and deployment",
+              "type": "object",
+              "required": [
+                "interfaceName"
+              ],
+              "properties": {
+                "interfaceName": {
+                  "description": "Human-readable interface name (used for config filename)",
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9_-]+$",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "interfaceDescription": {
+                  "description": "Purpose or description of this interface",
+                  "type": "string",
+                  "maxLength": 256
+                },
+                "environment": {
+                  "description": "Deployment environment tag (e.g., production, staging, development)",
+                  "type": "string",
+                  "enum": [
+                    "production",
+                    "staging",
+                    "development",
+                    "test"
+                  ]
+                }
+              }
             }
           }
         }
-      }
+      ]
     }
   }
 }
