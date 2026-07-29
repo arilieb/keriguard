@@ -4,7 +4,7 @@
 # Issue Interface credential to keriguard for main file
 kg interface create --name admin --alias admin \
                     --registry-name admin --recipient keriguard \
-                    --interface-name wg0 --listen-port 5000 --address "10.0.0.4/24" \
+                    --interface-name wg0 --listen-port 43567 --address "10.0.0.4/24" \
                     --interface-description "Main Interface Credential" \
                     --output keriguard-w0.cesr \
                     --registrar-url http://localhost:8080/
@@ -14,7 +14,7 @@ kli vc list --name admin --alias admin --issued
 # Issue Interface credential to peer
 kg interface create --name admin --alias admin \
                     --registry-name admin --recipient peer \
-                    --interface-name wg0 --listen-port 5000 --address "10.0.0.3/24" \
+                    --interface-name wg0 --listen-port 43567 --address "10.0.0.3/24" \
                     --interface-description "Main Interface Credential" \
                     --output peer-w0.cesr \
                     --registrar-url http://localhost:8080/
