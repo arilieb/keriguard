@@ -48,11 +48,15 @@ class KERIGuardConfig:
           name: "keriguard"
           alias: "keriguard-sentinel"
           base: ""
+          data_dir: null
           passcode: null
 
         logging:
           level: "INFO"
           file: "/var/log/keriguard/guardian.log"
+
+        guardian:
+          heartbeat_file: null
 
     Example:
         config = KERIGuardConfig.load("/etc/keriguard/guardian.yaml")
@@ -66,6 +70,7 @@ class KERIGuardConfig:
         self._wireguard = data.get("wireguard", {})
         self._keri = data.get("keri", {})
         self._logging = data.get("logging", {})
+        self._guardian = data.get("guardian", {})
 
     @classmethod
     def load(cls, config_path: str) -> "KERIGuardConfig":
@@ -133,6 +138,11 @@ class KERIGuardConfig:
         return self._keri.get("base", "")
 
     @property
+    def data_dir(self) -> Optional[str]:
+        """Absolute override for the KERI keystore/db head directory."""
+        return self._keri.get("data_dir")
+
+    @property
     def passcode(self) -> Optional[str]:
         """21-character encryption passcode for KERI keystore."""
         return self._keri.get("passcode")
@@ -147,6 +157,11 @@ class KERIGuardConfig:
     def logfile(self) -> Optional[str]:
         """Path to the log file."""
         return self._logging.get("file")
+
+    @property
+    def heartbeat_file(self) -> Optional[str]:
+        """Path touched after each poll cycle completes without error."""
+        return self._guardian.get("heartbeat_file")
 
 
 class RegistrarKeriguardConfig:
@@ -370,9 +385,11 @@ def generate_guardian_config(
     name: str = "keriguard",
     alias: str = "keriguard-sentinel",
     base: str = "",
+    data_dir: Optional[str] = None,
     passcode: Optional[str] = None,
     loglevel: str = "INFO",
     logfile: Optional[str] = None,
+    heartbeat_file: Optional[str] = None,
 ) -> dict:
     """
     Generate a guardian configuration dictionary.
@@ -385,9 +402,11 @@ def generate_guardian_config(
         name: KERI keystore name
         alias: KERI identifier alias
         base: KERI keystore base directory
+        data_dir: Absolute override for the KERI keystore/db head directory
         passcode: 21-character encryption passcode
         loglevel: Log level
         logfile: Path to log file
+        heartbeat_file: Path touched after each poll cycle completes without error
 
     Returns:
         dict: Guardian configuration structure
@@ -412,11 +431,17 @@ def generate_guardian_config(
     }
 
     # Only include optional values if they're set
+    if data_dir:
+        config["keri"]["data_dir"] = data_dir
+
     if passcode:
         config["keri"]["passcode"] = passcode
 
     if logfile:
         config["logging"]["file"] = logfile
+
+    if heartbeat_file:
+        config["guardian"] = {"heartbeat_file": heartbeat_file}
 
     return config
 

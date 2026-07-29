@@ -63,6 +63,13 @@ parser.add_argument(
     default="",
 )
 parser.add_argument(
+    "--data-dir",
+    help="absolute override for the KERI keystore/db head directory "
+    "(default: unset, preserving the existing default location)",
+    required=False,
+    default=None,
+)
+parser.add_argument(
     "--alias",
     "-a",
     help="human readable alias for the new identifier prefix",
@@ -138,7 +145,7 @@ async def up(args):
 
     # Create environment and identifier for the ACDC Auth Server
     keriguard_hby = habbing.Habery(
-        name=keriguard_name, base=args.base, temp=False, **kwa
+        name=keriguard_name, base=args.base, temp=False, headDirPath=args.data_dir, **kwa
     )
     if not (keriguard_hab := keriguard_hby.habByName(keriguard_alias)):
         keriguard_hab = keriguard_hby.makeHab(
@@ -152,7 +159,9 @@ async def up(args):
         )
 
     # Create the environment and identifier for the sentinel
-    sentinel_hby = habbing.Habery(name=sentinel_name, base=args.base, temp=False, **kwa)
+    sentinel_hby = habbing.Habery(
+        name=sentinel_name, base=args.base, temp=False, headDirPath=args.data_dir, **kwa
+    )
     if not (sentinel_hab := sentinel_hby.habByName(sentinel_alias)):
         sentinel_hab = sentinel_hby.makeHab(
             name=sentinel_alias,
@@ -293,6 +302,7 @@ async def up(args):
         name=keriguard_name,
         alias=keriguard_alias,
         base=args.base,
+        data_dir=args.data_dir,
         passcode=args.bran,
         loglevel="INFO",  # Default to INFO for guardian (up command uses ERROR)
         logfile=None,  # Can be set later if needed
@@ -303,7 +313,7 @@ async def up(args):
     else:
         save_guardian_config(guardian_config, "/etc/keriguard/keriguard.yaml")
 
-    kgb = KERIGuardBaser(name=args.name, base=args.base)
+    kgb = KERIGuardBaser(name=args.name, base=args.base, headDirPath=args.data_dir)
 
     if config.local:
         kgb.set_registrar(

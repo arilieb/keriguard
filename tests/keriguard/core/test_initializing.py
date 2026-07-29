@@ -242,6 +242,52 @@ logging:
         finally:
             Path(config_path).unlink()
 
+    def test_data_dir_and_heartbeat_file(self):
+        """Test that data_dir and heartbeat_file round-trip through YAML."""
+        config_content = """
+sentinel:
+  aid: "EAid"
+  export_dir: "/path"
+
+keri:
+  data_dir: "/Users/test/Library/Application Support/KERIGuard/keystores"
+
+guardian:
+  heartbeat_file: "/Users/test/Library/Application Support/KERIGuard/guardian.heartbeat"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(config_content)
+            config_path = f.name
+
+        try:
+            config = KERIGuardConfig.load(config_path)
+            assert config.data_dir == (
+                "/Users/test/Library/Application Support/KERIGuard/keystores"
+            )
+            assert config.heartbeat_file == (
+                "/Users/test/Library/Application Support/KERIGuard/guardian.heartbeat"
+            )
+        finally:
+            Path(config_path).unlink()
+
+    def test_data_dir_and_heartbeat_file_default_to_none(self):
+        """Test that data_dir and heartbeat_file default to None when absent."""
+        config_content = """
+sentinel:
+  aid: "EAid"
+  export_dir: "/path"
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(config_content)
+            config_path = f.name
+
+        try:
+            config = KERIGuardConfig.load(config_path)
+            assert config.data_dir is None
+            assert config.heartbeat_file is None
+        finally:
+            Path(config_path).unlink()
+
 
 class TestGenerateGuardianConfig:
     """Test generate_guardian_config function."""
@@ -362,6 +408,49 @@ class TestGenerateGuardianConfig:
         )
 
         assert "file" not in config["logging"]
+
+    def test_optional_data_dir_included(self):
+        """Test that data_dir is included when provided."""
+        config = generate_guardian_config(
+            sentinel_aid="EAid",
+            sentinel_export_dir="/path",
+            data_dir="/Users/test/Library/Application Support/KERIGuard/keystores",
+        )
+
+        assert (
+            config["keri"]["data_dir"]
+            == "/Users/test/Library/Application Support/KERIGuard/keystores"
+        )
+
+    def test_optional_data_dir_excluded(self):
+        """Test that data_dir is excluded when not provided."""
+        config = generate_guardian_config(
+            sentinel_aid="EAid",
+            sentinel_export_dir="/path",
+        )
+
+        assert "data_dir" not in config["keri"]
+
+    def test_optional_heartbeat_file_included(self):
+        """Test that heartbeat_file is included when provided."""
+        config = generate_guardian_config(
+            sentinel_aid="EAid",
+            sentinel_export_dir="/path",
+            heartbeat_file="/var/run/keriguard/guardian.heartbeat",
+        )
+
+        assert config["guardian"]["heartbeat_file"] == (
+            "/var/run/keriguard/guardian.heartbeat"
+        )
+
+    def test_optional_heartbeat_file_excluded(self):
+        """Test that the guardian section is excluded when heartbeat_file is not provided."""
+        config = generate_guardian_config(
+            sentinel_aid="EAid",
+            sentinel_export_dir="/path",
+        )
+
+        assert "guardian" not in config
 
 
 class TestSaveGuardianConfig:
