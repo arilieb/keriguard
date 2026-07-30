@@ -48,7 +48,6 @@ class KERIGuardConfig:
           name: "keriguard"
           alias: "keriguard-sentinel"
           base: ""
-          data_dir: null
           passcode: null
 
         logging:
@@ -136,11 +135,6 @@ class KERIGuardConfig:
     def base(self) -> str:
         """KERI keystore base directory (default: empty string)."""
         return self._keri.get("base", "")
-
-    @property
-    def data_dir(self) -> Optional[str]:
-        """Absolute override for the KERI keystore/db head directory."""
-        return self._keri.get("data_dir")
 
     @property
     def passcode(self) -> Optional[str]:
@@ -385,7 +379,6 @@ def generate_guardian_config(
     name: str = "keriguard",
     alias: str = "keriguard-sentinel",
     base: str = "",
-    data_dir: Optional[str] = None,
     passcode: Optional[str] = None,
     loglevel: str = "INFO",
     logfile: Optional[str] = None,
@@ -402,7 +395,6 @@ def generate_guardian_config(
         name: KERI keystore name
         alias: KERI identifier alias
         base: KERI keystore base directory
-        data_dir: Absolute override for the KERI keystore/db head directory
         passcode: 21-character encryption passcode
         loglevel: Log level
         logfile: Path to log file
@@ -431,9 +423,6 @@ def generate_guardian_config(
     }
 
     # Only include optional values if they're set
-    if data_dir:
-        config["keri"]["data_dir"] = data_dir
-
     if passcode:
         config["keri"]["passcode"] = passcode
 

@@ -75,13 +75,6 @@ parser.add_argument(
     "--base", "-b", type=str, default="", help="KERI keystore base directory"
 )
 parser.add_argument(
-    "--data-dir",
-    type=str,
-    default=None,
-    help="absolute override for the KERI keystore/db head directory "
-    "(default: unset, preserving the existing default location)",
-)
-parser.add_argument(
     "--passcode",
     type=str,
     dest="bran",
@@ -143,7 +136,6 @@ def merge_config(args, config_data):
         "name": "keriguard",
         "alias": "keriguard-sentinel",
         "base": "",
-        "data_dir": None,
         "heartbeat_file": None,
         "loglevel": "INFO",
     }
@@ -187,11 +179,6 @@ def merge_config(args, config_data):
             args.base,
             defaults["base"],
             lambda: config_data.base if config_data else None,
-        ),
-        "data_dir": get_value(
-            args.data_dir,
-            defaults["data_dir"],
-            lambda: config_data.data_dir if config_data else None,
         ),
         "bran": args.bran or (config_data.passcode if config_data else None),
         "heartbeat_file": get_value(
@@ -263,16 +250,11 @@ def start(args):
         return 1
 
     hby = habbing.Habery(
-        name=config["name"],
-        base=config["base"],
-        bran=config["bran"],
-        headDirPath=config["data_dir"],
+        name=config["name"], base=config["base"], bran=config["bran"]
     )
     hab = hby.habByName(config["alias"])
     rgy = credentialing.Regery(hby=hby, name=hby.name, base=hby.base, temp=hby.temp)
-    kgb = KERIGuardBaser(
-        name=hby.name, base=hby.base, temp=hby.temp, headDirPath=config["data_dir"]
-    )
+    kgb = KERIGuardBaser(name=hby.name, base=hby.base, temp=hby.temp)
 
     # Create sentinel handler configuration
     sentinel_config = SentinelHandlerConfig(
