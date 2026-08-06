@@ -89,6 +89,14 @@ parser.add_argument(
     "keystore (overridden by --passcode if both are given)",
 )
 parser.add_argument(
+    "--socket-dir",
+    type=str,
+    default="/tmp",
+    help="Directory containing the sentinel daemon's Unix socket, used for "
+    "peer-AID resolution retries (default: /tmp; must match the sentinel "
+    "daemon's own --socket-dir)",
+)
+parser.add_argument(
     "--heartbeat-file",
     type=str,
     default=None,
@@ -136,6 +144,7 @@ def merge_config(args, config_data):
         "name": "keriguard",
         "alias": "keriguard-sentinel",
         "base": "",
+        "socket_dir": "/tmp",
         "heartbeat_file": None,
         "loglevel": "INFO",
     }
@@ -181,6 +190,11 @@ def merge_config(args, config_data):
             lambda: config_data.base if config_data else None,
         ),
         "bran": args.bran or (config_data.passcode if config_data else None),
+        "socket_dir": get_value(
+            args.socket_dir,
+            defaults["socket_dir"],
+            lambda: config_data.socket_dir if config_data else None,
+        ),
         "heartbeat_file": get_value(
             args.heartbeat_file,
             defaults["heartbeat_file"],
@@ -266,6 +280,7 @@ def start(args):
         hab=hab,
         rgy=rgy,
         kgb=kgb,
+        socket_dir=config["socket_dir"],
     )
 
     # Create and register handler
@@ -278,6 +293,7 @@ def start(args):
     logger.info(f"  Poll interval: {sentinel_config.poll_interval}s")
     logger.info(f"  KERI name: {hby.name}")
     logger.info(f"  KERI alias: {hab.name}")
+    logger.info(f"  Sentinel socket directory: {sentinel_config.socket_dir}")
 
     # Run the Sentinel framework
     # This blocks until SIGINT/SIGTERM

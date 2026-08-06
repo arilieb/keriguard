@@ -35,6 +35,7 @@ class CredService:
         config_dir,
         hab=None,
         sentinel_aid=None,
+        socket_dir="/tmp",
     ):
         self.hby = hby
         self.hab = hab
@@ -42,6 +43,7 @@ class CredService:
         self.sentinel_aid = sentinel_aid
         self.rgy = rgy
         self.config_dir = config_dir
+        self.socket_dir = socket_dir
 
     async def process_interface_credential(self, said: str, creder: SerderACDC):
         """
@@ -281,7 +283,9 @@ class CredService:
         logger.info(
             f"Starting peer AID resolution for {missing_aid} (credential {said})"
         )
-        watcher_connector = LocalWatcherConnector(self.hby, self.hab, self.sentinel_aid)
+        watcher_connector = LocalWatcherConnector(
+            self.hby, self.hab, self.sentinel_aid, socket_dir=self.socket_dir
+        )
         watcher_connector.watch(missing_aid, None)
 
         for attempt in range(1, max_attempts + 1):

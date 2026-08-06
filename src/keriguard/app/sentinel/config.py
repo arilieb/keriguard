@@ -32,3 +32,9 @@ class SentinelHandlerConfig:
     kgb: KERIGuardBaser = None
     # Handler behavior
     backup_configs: bool = True  # Create .bak files on updates
+
+    # Directory containing the sentinel's Unix socket (LocalWatcherConnector
+    # peer-AID resolution retries dial this). Must match whatever
+    # `--socket-dir` the sentinel daemon was actually started with -- default
+    # ("/tmp") only matches Linux/Debian's unrelocated socket.
+    socket_dir: str = "/tmp"

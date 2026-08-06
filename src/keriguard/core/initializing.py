@@ -114,6 +114,11 @@ class KERIGuardConfig:
         """Polling interval in seconds (default: 2.0)."""
         return self._sentinel.get("poll_interval", 2.0)
 
+    @property
+    def socket_dir(self) -> str:
+        """Directory containing the sentinel daemon's Unix socket (default: /tmp)."""
+        return self._sentinel.get("socket_dir", "/tmp")
+
     # WireGuard properties
     @property
     def config_dir(self) -> str:
