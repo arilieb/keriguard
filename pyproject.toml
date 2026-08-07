@@ -27,7 +27,7 @@ authors = [
 dependencies = [
     "keri~=1.3.5",
     "kept @git+https://git@github.com/healthKERI/kept.git@main",
-    "sentinel @git+https://git@github.com/arilieb/sentinel.git@feat-daemon-support",
+    "sentinel @git+https://git@github.com/healthKERI/sentinel.git@main",
     "multicommand>=1.0.0",
     'cbor>=1.0.0',
     'httpx>=0.28.1',
