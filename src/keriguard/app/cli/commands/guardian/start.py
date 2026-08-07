@@ -263,9 +263,7 @@ def start(args):
         print(f"Error: Export directory not found: {export_dir}", file=sys.stderr)
         return 1
 
-    hby = habbing.Habery(
-        name=config["name"], base=config["base"], bran=config["bran"]
-    )
+    hby = habbing.Habery(name=config["name"], base=config["base"], bran=config["bran"])
     hab = hby.habByName(config["alias"])
     rgy = credentialing.Regery(hby=hby, name=hby.name, base=hby.base, temp=hby.temp)
     kgb = KERIGuardBaser(name=hby.name, base=hby.base, temp=hby.temp)

@@ -152,9 +152,7 @@ async def up(args):
         )
 
     # Create the environment and identifier for the sentinel
-    sentinel_hby = habbing.Habery(
-        name=sentinel_name, base=args.base, temp=False, **kwa
-    )
+    sentinel_hby = habbing.Habery(name=sentinel_name, base=args.base, temp=False, **kwa)
     if not (sentinel_hab := sentinel_hby.habByName(sentinel_alias)):
         sentinel_hab = sentinel_hby.makeHab(
             name=sentinel_alias,
