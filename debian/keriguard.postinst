@@ -91,7 +91,6 @@ EOF
 # KERIGuard Guardian Service Configuration
 # IMPORTANT: Update these values before starting the service
 KERIGUARD_CONFIG=/etc/keriguard/keriguard.yaml
-ARCHIMEDES_ENVIRONMENT=development
 EOF
             chown root:keriguard /etc/default/keriguard-guardian
             chmod 640 /etc/default/keriguard-guardian
@@ -103,7 +102,6 @@ EOF
 # KERIGuard Sentinel Service Configuration
 # Path to sentinel configuration file
 SENTINEL_CONFIG=/etc/keriguard/sentinel.yaml
-ARCHIMEDES_ENVIRONMENT=development
 EOF
             chown root:keriguard /etc/default/keriguard-sentinel
             chmod 640 /etc/default/keriguard-sentinel

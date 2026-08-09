@@ -1,8 +1,8 @@
-keriguard (0.0.1-1+dev45c830f) stable; urgency=medium
+keriguard (0.0.1-1+dev5d48b39) stable; urgency=medium
 
-  * Development build from commit 45c830f
+  * Development build from commit 5d48b39
   * Guardian service for Wireguard management
   * Sentinel service for KERI event monitoring
   * CLI utilities: kg and kg-sentinel
 
- -- Phil Feairheller <phil@healthKERI.com>  Fri, 24 Jul 2026 15:06:01 -0700
+ -- Phil Feairheller <phil@healthKERI.com>  Tue, 04 Aug 2026 13:43:34 -0700
