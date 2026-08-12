@@ -37,6 +37,7 @@ class CredHandler:
             config.config_dir,
             config.hab,
             config.sentinel_aid,
+            config.socket_dir,
         )
 
     async def process(self, event: CredentialEvent):

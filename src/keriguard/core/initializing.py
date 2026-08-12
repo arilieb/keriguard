@@ -54,6 +54,9 @@ class KERIGuardConfig:
           level: "INFO"
           file: "/var/log/keriguard/guardian.log"
 
+        guardian:
+          heartbeat_file: null
+
     Example:
         config = KERIGuardConfig.load("/etc/keriguard/guardian.yaml")
         print(config.sentinel_aid)
@@ -66,6 +69,7 @@ class KERIGuardConfig:
         self._wireguard = data.get("wireguard", {})
         self._keri = data.get("keri", {})
         self._logging = data.get("logging", {})
+        self._guardian = data.get("guardian", {})
 
     @classmethod
     def load(cls, config_path: str) -> "KERIGuardConfig":
@@ -110,6 +114,11 @@ class KERIGuardConfig:
         """Polling interval in seconds (default: 2.0)."""
         return self._sentinel.get("poll_interval", 2.0)
 
+    @property
+    def socket_dir(self) -> str:
+        """Directory containing the sentinel daemon's Unix socket (default: /tmp)."""
+        return self._sentinel.get("socket_dir", "/tmp")
+
     # WireGuard properties
     @property
     def config_dir(self) -> str:
@@ -147,6 +156,11 @@ class KERIGuardConfig:
     def logfile(self) -> Optional[str]:
         """Path to the log file."""
         return self._logging.get("file")
+
+    @property
+    def heartbeat_file(self) -> Optional[str]:
+        """Path touched after each poll cycle completes without error."""
+        return self._guardian.get("heartbeat_file")
 
 
 class RegistrarKeriguardConfig:
@@ -373,6 +387,7 @@ def generate_guardian_config(
     passcode: Optional[str] = None,
     loglevel: str = "INFO",
     logfile: Optional[str] = None,
+    heartbeat_file: Optional[str] = None,
 ) -> dict:
     """
     Generate a guardian configuration dictionary.
@@ -388,6 +403,7 @@ def generate_guardian_config(
         passcode: 21-character encryption passcode
         loglevel: Log level
         logfile: Path to log file
+        heartbeat_file: Path touched after each poll cycle completes without error
 
     Returns:
         dict: Guardian configuration structure
@@ -417,6 +433,9 @@ def generate_guardian_config(
 
     if logfile:
         config["logging"]["file"] = logfile
+
+    if heartbeat_file:
+        config["guardian"] = {"heartbeat_file": heartbeat_file}
 
     return config
 
